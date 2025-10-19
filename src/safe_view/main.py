@@ -1,0 +1,340 @@
+import typer
+from textual import on
+from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal, VerticalScroll
+from textual.widgets import (
+    Header, Footer, DataTable, Static, Button,
+    Input, Label, SelectionList, TabbedContent,
+    TabPane, Markdown
+)
+from textual.reactive import reactive
+import json
+import struct
+from pathlib import Path
+from safetensors import safe_open
+import torch
+from typing import Dict, Any, List
+import humanize
+from huggingface_hub import snapshot_download
+
+class SafetensorsHeader(Static):
+    """显示safetensors文件头部信息"""
+
+    def __init__(self):
+        super().__init__()
+        self.file_info = reactive({
+            "filename": "",
+            "file_size": 0,
+            "tensor_count": 0,
+            "total_parameters": 0
+        })
+
+    def render(self) -> str:
+        if not self.file_info["filename"]:
+            return "未选择文件"
+
+        info = self.file_info
+        return (
+            f"文件: {info['filename']} | "
+            f"大小: {info['file_size']/1024/1024:.2f} MB | "
+            f"Tensor数量: {info['tensor_count']} | "
+            f"总参数量: {info['total_parameters']:,}"
+        )
+
+class TensorInfoTable(DataTable):
+    """显示tensors信息的表格"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cursor_type = "row"
+        self.show_header = True
+        self.zebra_stripes = True
+
+    def on_mount(self) -> None:
+        self.add_columns(
+            "Tensor名称",
+            "数据类型",
+            "形状",
+            "参数量",
+            "大小(MB)"
+        )
+
+    def update_table(self, tensors_data: List[Dict]) -> None:
+        self.clear()
+        for tensor in tensors_data:
+            shape_str = "×".join(map(str, tensor["shape"]))
+            params = tensor["parameters"]
+            size_mb = tensor["size_mb"]
+            self.add_row(
+                tensor["name"],
+                tensor["dtype"],
+                shape_str,
+                f"{params:,}",
+                f"{size_mb:.2f}MB"
+            )
+
+class TensorDetailView(Markdown):
+    """显示选中tensor的详细信息"""
+    tensor_data = reactive({})
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def watch_tensor_data(self, data: Dict) -> None:
+        self.log(f"watch_tensor_data received: {data}")
+        if not data:
+            self.update("选择左侧表格中的tensor查看详细信息")
+            return
+
+        # 计算统计信息
+        shape_str = " × ".join(map(str, data["shape"]))
+        total_elements = data["parameters"]
+
+        md_content = f"""## Tensor: {data['name']}
+
+### 基本信息
+- **数据类型**: {data['dtype']}
+- **形状**: {shape_str}
+- **总元素数**: {total_elements:,}
+- **内存占用**: {data['size_mb']:.2f} MB
+
+### 数据统计
+"""
+
+        # 如果有实际数据，显示统计信息
+        if "statistics" in data:
+            stats = data["statistics"]
+            md_content += f"""
+- **最小值**: {stats.get('min', 'N/A'):.6f}
+- **最大值**: {stats.get('max', 'N/A'):.6f}
+- **平均值**: {stats.get('mean', 'N/A'):.6f}
+- **标准差**: {stats.get('std', 'N/A'):.6f}
+"""
+
+        self.update(md_content)
+
+class SafeViewApp(App):
+    """A terminal application to view safetensors files."""
+
+    TITLE = "Safe View"
+    CSS_PATH = "safe_view.css"
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("h", "scroll_left", "Scroll Left"),
+        ("j", "cursor_down", "Cursor Down"),
+        ("k", "cursor_up", "Cursor Up"),
+        ("l", "scroll_right", "Scroll Right"),
+        ("down", "cursor_down", "Cursor Down"),
+        ("up", "cursor_up", "Cursor Up"),
+        ("left", "scroll_left", "Scroll Left"),
+        ("right", "scroll_right", "Scroll Right"),
+        ("g", "go_to_top", "Go to Top"),
+        ("G", "go_to_bottom", "Go to Bottom"),
+        ("ctrl+f", "page_down", "Page Down"),
+        ("ctrl+b", "page_up", "Page Up"),
+        # ("ctrl+d", "half_page_down", "Half Page Down"),
+        # ("ctrl+u", "half_page_up", "Half Page Up"),
+    ]
+
+    def __init__(self, path: Path, title: str):
+        super().__init__()
+        self.path = path
+        self.sub_title = title
+        self.tensors_data = reactive([])
+        self.selected_tensor = reactive({})
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets for the app."""
+        yield Header()
+        yield SafetensorsHeader()
+        with Container(id="app-body"):
+            with Horizontal():
+                with VerticalScroll(id="left-panel"):
+                    yield TensorInfoTable(id="tensor-table")
+                with VerticalScroll(id="right-panel"):
+                    yield TensorDetailView(id="tensor-detail")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Called when the app is mounted."""
+        self.title = "Safetensors文件查看器"
+        self.sub_title = "可视化深度学习模型权重"
+        self.process_safetensors_file()
+
+    def on_ready(self) -> None:
+        self.query_one(TensorInfoTable).focus()
+        self.update_detail_view()
+
+    def process_safetensors_file(self) -> None:
+        """处理safetensors文件"""
+        tensors_data = []
+        total_parameters = 0
+        total_size = 0
+
+        files_to_process = []
+        if self.path.is_file():
+            files_to_process.append(self.path)
+        else:
+            files_to_process.extend(sorted(self.path.glob("**/*.safetensors")))
+
+        for file_path in files_to_process:
+            try:
+                with safe_open(file_path, framework="pt", device="cpu") as f:
+                    for key in f.keys():
+                        tensor = f.get_tensor(key)
+                        shape = list(tensor.shape)
+                        parameters = tensor.numel()
+                        size_in_bytes = tensor.nelement() * tensor.element_size()
+                        size_mb = size_in_bytes / 1024 / 1024
+                        total_size += size_in_bytes
+
+                        tensor_info = {
+                            "name": key,
+                            "dtype": str(tensor.dtype),
+                            "shape": shape,
+                            "parameters": parameters,
+                            "size_mb": size_mb,
+                            "tensor_object": tensor
+                        }
+
+                        if parameters <= 1_000_000_000:  # 限制计算数量
+                            try:
+                                tensor_info["statistics"] = {
+                                    "min": tensor.min().item(),
+                                    "max": tensor.max().item(),
+                                    "mean": tensor.mean().item(),
+                                    "std": tensor.std().item()
+                                }
+                            except:
+                                pass
+
+                        tensors_data.append(tensor_info)
+                        total_parameters += parameters
+            except Exception as e:
+                self.notify(f"解析文件失败: {str(e)}", severity="error")
+                return
+
+        self.tensors_data = tensors_data
+
+        header = self.query_one(SafetensorsHeader)
+        header.file_info = {
+            "filename": self.path.name,
+            "file_size": total_size,
+            "tensor_count": len(tensors_data),
+            "total_parameters": total_parameters
+        }
+
+        table = self.query_one("#tensor-table", TensorInfoTable)
+        table.update_table(tensors_data)
+
+        self.notify(f"成功加载文件，包含 {len(tensors_data)} 个tensors")
+
+    def update_detail_view(self) -> None:
+        """Update the detail view with the selected tensor."""
+        table = self.query_one(TensorInfoTable)
+        self.log(f"update_detail_view called, cursor_row: {table.cursor_row}")
+        if table.cursor_row is None:
+            return
+        if 0 <= table.cursor_row < len(self.tensors_data):
+            self.selected_tensor = self.tensors_data[table.cursor_row]
+            self.log(f"selected_tensor: {self.selected_tensor['name']}")
+            detail_view = self.query_one(TensorDetailView)
+            detail_view.tensor_data = self.selected_tensor
+
+    def action_cursor_down(self) -> None:
+        """Move cursor down in the table."""
+        table = self.query_one(TensorInfoTable)
+        table.action_cursor_down()
+        self.update_detail_view()
+
+    def action_cursor_up(self) -> None:
+        """Move cursor up in the table."""
+        table = self.query_one(TensorInfoTable)
+        table.action_cursor_up()
+        self.update_detail_view()
+
+    def action_go_to_top(self) -> None:
+        """Go to the top of the table."""
+        table = self.query_one(TensorInfoTable)
+        table.action_scroll_top()
+        self.update_detail_view()
+
+    def action_go_to_bottom(self) -> None:
+        """Go to the bottom of the table."""
+        table = self.query_one(TensorInfoTable)
+        table.action_scroll_bottom()
+        self.update_detail_view()
+
+    def action_page_down(self) -> None:
+        """Scroll down by a page."""
+        table = self.query_one(TensorInfoTable)
+        table.action_page_down()
+        self.update_detail_view()
+
+    def action_page_up(self) -> None:
+        """Scroll up by a page."""
+        table = self.query_one(TensorInfoTable)
+        table.action_page_up()
+        self.update_detail_view()
+
+    def action_half_page_down(self) -> None:
+        """Scroll down by half a page."""
+        table = self.query_one(TensorInfoTable)
+        scroll = self.query_one("#left-panel", VerticalScroll)
+        table.action_cursor_down(scroll.window.height // 2)
+        self.update_detail_view()
+
+    def action_half_page_up(self) -> None:
+        """Scroll up by half a page."""
+        table = self.query_one(TensorInfoTable)
+        scroll = self.query_one("#left-panel", VerticalScroll)
+        table.action_cursor_up(scroll.window.height // 2)
+        self.update_detail_view()
+
+
+    def action_scroll_left(self) -> None:
+        """Scroll left."""
+        table = self.query_one(TensorInfoTable)
+        table.action_cursor_left()
+
+    def action_scroll_right(self) -> None:
+        """Scroll right."""
+        table = self.query_one(TensorInfoTable)
+        table.action_cursor_right()
+
+
+    @on(DataTable.RowSelected, "#tensor-table")
+    def on_tensor_selected(self, event: DataTable.RowSelected) -> None:
+        """处理tensor选择事件"""
+        if not self.tensors_data:
+            return
+
+        selected_row = event.cursor_row
+        if 0 <= selected_row < len(self.tensors_data):
+            self.selected_tensor = self.tensors_data[selected_row]
+            self.log(f"on_tensor_selected: {self.selected_tensor['name']}")
+            detail_view = self.query_one(TensorDetailView)
+            detail_view.tensor_data = self.selected_tensor
+
+def main(
+    path: str = typer.Argument(
+        ..., help="Path to a .safetensors file or a Hugging Face model ID."
+    )
+):
+    """
+    Display safetensors file information in a clean way.
+    """
+    local_path = Path(path)
+    title = path
+    if not local_path.exists():
+        try:
+            local_path = Path(snapshot_download(repo_id=path, allow_patterns=["*.safetensors", "model.index.json"]))
+        except Exception as e:
+            print(f"Error downloading model from Hugging Face Hub: {e}")
+            raise typer.Exit(1)
+
+    app = SafeViewApp(local_path, title)
+    app.run()
+
+if __name__ == "__main__":
+    typer.run(main)

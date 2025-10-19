@@ -1,0 +1,16 @@
+#left-panel {
+    width: 70%;
+    /* border: panel $primary; */
+}
+#right-panel {
+    width: 30%;
+    /* border: panel $primary; */
+}
+
+TensorInfoTable {
+    border: solid $accent;
+}
+
+TensorDetailView {
+    border: solid $accent;
+}
