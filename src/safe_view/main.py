@@ -134,6 +134,8 @@ class SafeViewApp(App):
         ("ctrl+b", "page_up", "Page Up"),
         # ("ctrl+d", "half_page_down", "Half Page Down"),
         # ("ctrl+u", "half_page_up", "Half Page Up"),
+        ("/", "search_tensor", "Search Tensor"),
+        ("escape", "exit_search", "Exit Search"),
     ]
 
     def __init__(self, path: Path, title: str):
@@ -142,6 +144,8 @@ class SafeViewApp(App):
         self.sub_title = title
         self.tensors_data = reactive([])
         self.selected_tensor = reactive({})
+        self.filtered_tensors_data = reactive([])
+        self.search_mode = False
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -150,6 +154,7 @@ class SafeViewApp(App):
         with Container(id="app-body"):
             with Horizontal():
                 with VerticalScroll(id="left-panel"):
+                    yield Input(placeholder="输入tensor名称进行搜索... (按Escape退出)", id="search-input", classes="invisible")
                     yield TensorInfoTable(id="tensor-table")
                 with VerticalScroll(id="right-panel"):
                     yield TensorDetailView(id="tensor-detail")
@@ -215,6 +220,7 @@ class SafeViewApp(App):
                 return
 
         self.tensors_data = tensors_data
+        self.filtered_tensors_data = tensors_data  # Initialize with all tensors
 
         header = self.query_one(SafetensorsHeader)
         header.file_info = {
@@ -225,7 +231,7 @@ class SafeViewApp(App):
         }
 
         table = self.query_one("#tensor-table", TensorInfoTable)
-        table.update_table(tensors_data)
+        table.update_table(self.filtered_tensors_data)
 
         self.notify(f"成功加载文件，包含 {len(tensors_data)} 个tensors")
 
@@ -235,8 +241,8 @@ class SafeViewApp(App):
         self.log(f"update_detail_view called, cursor_row: {table.cursor_row}")
         if table.cursor_row is None:
             return
-        if 0 <= table.cursor_row < len(self.tensors_data):
-            self.selected_tensor = self.tensors_data[table.cursor_row]
+        if 0 <= table.cursor_row < len(self.filtered_tensors_data):
+            self.selected_tensor = self.filtered_tensors_data[table.cursor_row]
             self.log(f"selected_tensor: {self.selected_tensor['name']}")
             detail_view = self.query_one(TensorDetailView)
             detail_view.tensor_data = self.selected_tensor
@@ -244,14 +250,16 @@ class SafeViewApp(App):
     def action_cursor_down(self) -> None:
         """Move cursor down in the table."""
         table = self.query_one(TensorInfoTable)
-        table.action_cursor_down()
-        self.update_detail_view()
+        if len(self.filtered_tensors_data) > 0:
+            table.action_cursor_down()
+            self.update_detail_view()
 
     def action_cursor_up(self) -> None:
         """Move cursor up in the table."""
         table = self.query_one(TensorInfoTable)
-        table.action_cursor_up()
-        self.update_detail_view()
+        if len(self.filtered_tensors_data) > 0:
+            table.action_cursor_up()
+            self.update_detail_view()
 
     def action_go_to_top(self) -> None:
         """Go to the top of the table."""
@@ -302,16 +310,73 @@ class SafeViewApp(App):
         table = self.query_one(TensorInfoTable)
         table.action_cursor_right()
 
+    def action_search_tensor(self) -> None:
+        """Enter search mode."""
+        self.search_mode = True
+        search_input = self.query_one("#search-input", Input)
+        search_input.visible = True
+        search_input.focus()
+        search_input.value = ""
+        # self.notify("搜索模式已启用，输入tensor名称进行过滤", timeout=1)
+
+    def action_exit_search(self) -> None:
+        """Exit search mode and reset to full list."""
+        self.search_mode = False
+        search_input = self.query_one("#search-input", Input)
+        search_input.visible = False
+        search_input.value = ""
+        self.filtered_tensors_data = self.tensors_data  # Reset to full list
+        table = self.query_one("#tensor-table", TensorInfoTable)
+        table.update_table(self.filtered_tensors_data)
+        # self.notify("已退出搜索模式", timeout=1)
+        self.query_one(TensorInfoTable).focus()
+
+    def filter_tensors(self, search_term: str) -> None:
+        """Filter tensors based on search term."""
+        if not search_term:
+            self.filtered_tensors_data = self.tensors_data
+        else:
+            # Filter tensors that contain the search term (case insensitive)
+            filtered = [
+                tensor for tensor in self.tensors_data
+                if search_term.lower() in tensor["name"].lower()
+            ]
+            self.filtered_tensors_data = filtered
+
+        # Update the table with filtered results
+        table = self.query_one("#tensor-table", TensorInfoTable)
+        table.update_table(self.filtered_tensors_data)
+
+        # If there are results, focus on the first one
+        if len(self.filtered_tensors_data) > 0:
+            # table.cursor_row = 0
+            self.update_detail_view()
+        else:
+            # Clear the detail view if no results
+            detail_view = self.query_one(TensorDetailView)
+            detail_view.tensor_data = {}
+
+    @on(Input.Changed, "#search-input")
+    def on_search_input_changed(self, event: Input.Changed) -> None:
+        """Handle real-time search input changes."""
+        if self.search_mode:
+            self.filter_tensors(event.value)
+
+    @on(Input.Submitted, "#search-input")
+    def on_search_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle search input submission."""
+        # Focus back on the table after search
+        self.query_one(TensorInfoTable).focus()
 
     @on(DataTable.RowSelected, "#tensor-table")
     def on_tensor_selected(self, event: DataTable.RowSelected) -> None:
         """处理tensor选择事件"""
-        if not self.tensors_data:
+        if not self.filtered_tensors_data:
             return
 
         selected_row = event.cursor_row
-        if 0 <= selected_row < len(self.tensors_data):
-            self.selected_tensor = self.tensors_data[selected_row]
+        if 0 <= selected_row < len(self.filtered_tensors_data):
+            self.selected_tensor = self.filtered_tensors_data[selected_row]
             self.log(f"on_tensor_selected: {self.selected_tensor['name']}")
             detail_view = self.query_one(TensorDetailView)
             detail_view.tensor_data = self.selected_tensor
