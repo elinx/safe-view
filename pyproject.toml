@@ -5,16 +5,43 @@ description = "A terminal application to view safetensors files"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "typer",
-    "textual",
+    "textual>=0.40.0",
     "safetensors",
     "humanize",
     "huggingface-hub",
     "torch",
 ]
+authors = [
+    {name = "Elinx"},
+]
+maintainers = [
+    {name = "Elinx"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
 
 [project.scripts]
 safe-view = "safe_view.main:main"
+
+[project.urls]
+Homepage = "https://github.com/elinx/safe-view"
+Repository = "https://github.com/elinx/safe-view"
+"Bug Reports" = "https://github.com/elinx/safe-view/issues"
+"Source Code" = "https://github.com/elinx/safe-view"
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]
