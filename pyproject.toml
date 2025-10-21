@@ -1,7 +1,7 @@
 [project]
 name = "safe-view"
 version = "0.1.0"
-description = "Add your description here"
+description = "A terminal application to view safetensors files"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -12,3 +12,10 @@ dependencies = [
     "huggingface-hub",
     "torch",
 ]
+
+[project.scripts]
+safe-view = "safe_view.main:main"
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"

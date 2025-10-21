@@ -1,44 +1,70 @@
 # SafeView
 
-A terminal application to view safetensors files.
+A terminal application to view safetensors files. SafeView provides a clean, interactive terminal interface for exploring safetensors files and Hugging Face models.
+
+## Features
+
+- Interactive terminal UI for browsing tensors
+- Detailed tensor information including shape, data type, and size
+- Statistical information about tensor values (min, max, mean, std)
+- Support for local safetensors files and Hugging Face model repositories
+- Clean and intuitive Textual-based interface
 
 ## Installation
 
-1.  Install `uv`:
+### Using pip:
+```shell
+pip install .
+```
 
-    ```shell
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    ```
+### Using uv:
+```shell
+uv pip install .
+```
 
-2.  Create a virtual environment:
+### Development mode:
+If you want to run in development mode, you can install in editable mode:
 
-    ```shell
-    uv venv
-    ```
+```shell
+pip install -e .
+```
 
-3.  Activate the virtual environment:
+or with uv:
 
-    ```shell
-    source .venv/bin/activate
-    ```
-
-4.  Install the dependencies:
-
-    ```shell
-    uv pip install .
-    ```
+```shell
+uv pip install -e .
+```
 
 ## Usage
 
-```shell
-python -m safe_view.main /path/to/your/file.safetensors
-```
-
-Or for a Hugging Face model directory:
+After installation, you can run the application directly from the command line:
 
 ```shell
-export TEXTUAL_LOG=./sv.log
-export PYTHONPATH=./src:$PYTHONPATH
-python -m safe_view.main Qwen/Qwen3-0.6B
+safe-view /path/to/your/file.safetensors
 ```
 
+Or for a Hugging Face model:
+
+```shell
+safe-view Qwen/Qwen3-0.6B
+```
+
+For help:
+
+```shell
+safe-view --help
+```
+
+## Controls
+
+- `q`: Quit the application
+- `h`, `j`, `k`, `l` or arrow keys: Navigate between tensors
+- `g`: Go to top of the tensor list
+- `G`: Go to bottom of the tensor list
+- `Ctrl+f` / `Ctrl+b`: Page up/down
+- Click on a tensor in the left panel to view its details on the right
+
+## Requirements
+
+- Python 3.9+
+- Dependencies listed in pyproject.toml

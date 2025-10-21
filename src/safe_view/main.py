@@ -1,4 +1,4 @@
-import typer
+import argparse
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
@@ -316,25 +316,25 @@ class SafeViewApp(App):
             detail_view = self.query_one(TensorDetailView)
             detail_view.tensor_data = self.selected_tensor
 
-def main(
-    path: str = typer.Argument(
-        ..., help="Path to a .safetensors file or a Hugging Face model ID."
-    )
-):
+def main():
     """
     Display safetensors file information in a clean way.
     """
-    local_path = Path(path)
-    title = path
+    parser = argparse.ArgumentParser(description="Safe View - A terminal application to view safetensors files")
+    parser.add_argument("path", help="Path to a .safetensors file or a Hugging Face model ID")
+    args = parser.parse_args()
+
+    local_path = Path(args.path)
+    title = args.path
     if not local_path.exists():
         try:
-            local_path = Path(snapshot_download(repo_id=path, allow_patterns=["*.safetensors", "model.index.json"]))
+            local_path = Path(snapshot_download(repo_id=args.path, allow_patterns=["*.safetensors", "model.index.json"]))
         except Exception as e:
             print(f"Error downloading model from Hugging Face Hub: {e}")
-            raise typer.Exit(1)
+            exit(1)
 
     app = SafeViewApp(local_path, title)
     app.run()
 
 if __name__ == "__main__":
-    typer.run(main)
+    main()
