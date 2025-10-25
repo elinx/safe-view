@@ -6,10 +6,11 @@ A terminal application to view safetensors files. SafeView provides a clean, int
 
 - Interactive terminal UI for browsing tensors
 - Detailed tensor information including shape, data type, and size
-- Statistical information about tensor values (min, max, mean, std)
+- Statistical information about tensor values (min, max, mean, std) - loaded on demand when a tensor is selected
 - Support for local safetensors files and Hugging Face model repositories
 - Real-time search and filtering by tensor name
 - Clean and intuitive Textual-based interface
+- Optimized loading - only metadata is loaded initially, tensor statistics shown when a tensor is selected and enter is pressed
 
 ## Installation
 
@@ -65,7 +66,7 @@ safe-view --help
 - `Ctrl+f` / `Ctrl+b`: Page up/down
 - `/`: Enter search mode to filter tensors by name
 - `Escape`: Exit search mode
-- Click on a tensor in the left panel to view its details on the right
+- Click on a tensor in the left panel or press Enter to view its details and statistics on the right
 
 ## Requirements
 

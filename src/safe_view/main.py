@@ -12,6 +12,7 @@ import json
 import struct
 from pathlib import Path
 from safetensors import safe_open
+from safetensors.torch import _getdtype
 import torch
 from typing import Dict, Any, List
 import humanize
@@ -20,14 +21,15 @@ from huggingface_hub import snapshot_download
 class SafetensorsHeader(Static):
     """显示safetensors文件头部信息"""
 
+    file_info = reactive({
+        "filename": "",
+        "file_size": 0,
+        "tensor_count": 0,
+        "total_parameters": 0
+    })
+
     def __init__(self):
         super().__init__()
-        self.file_info = reactive({
-            "filename": "",
-            "file_size": 0,
-            "tensor_count": 0,
-            "total_parameters": 0
-        })
 
     def render(self) -> str:
         if not self.file_info["filename"]:
@@ -75,7 +77,7 @@ class TensorInfoTable(DataTable):
 
 class TensorDetailView(Markdown):
     """显示选中tensor的详细信息"""
-    tensor_data = reactive({})
+    tensor_data = reactive(None)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -98,17 +100,24 @@ class TensorDetailView(Markdown):
 - **总元素数**: {total_elements:,}
 - **内存占用**: {data['size_mb']:.2f} MB
 
-### 数据统计
 """
 
-        # 如果有实际数据，显示统计信息
-        if "statistics" in data:
+        # Check if statistics are already loaded
+        if data.get("statistics") is not None:
             stats = data["statistics"]
-            md_content += f"""
+            md_content += f"""### 数据统计
 - **最小值**: {stats.get('min', 'N/A'):.6f}
 - **最大值**: {stats.get('max', 'N/A'):.6f}
 - **平均值**: {stats.get('mean', 'N/A'):.6f}
 - **标准差**: {stats.get('std', 'N/A'):.6f}
+"""
+        else:
+            # Show placeholder if statistics are not loaded yet
+            md_content += f"""### 数据统计
+- **最小值**: <等待加载... 按Enter键加载统计信息>
+- **最大值**: <等待加载... 按Enter键加载统计信息>
+- **平均值**: <等待加载... 按Enter键加载统计信息>
+- **标准差**: <等待加载... 按Enter键加载统计信息>
 """
 
         self.update(md_content)
@@ -136,15 +145,16 @@ class SafeViewApp(App):
         # ("ctrl+u", "half_page_up", "Half Page Up"),
         ("/", "search_tensor", "Search Tensor"),
         ("escape", "exit_search", "Exit Search"),
+        ("x", "load_tensor_stats", "Load Tensor Statistics"),
     ]
 
     def __init__(self, path: Path, title: str):
         super().__init__()
         self.path = path
         self.sub_title = title
-        self.tensors_data = reactive([])
-        self.selected_tensor = reactive({})
-        self.filtered_tensors_data = reactive([])
+        self.tensors_data = []
+        self.selected_tensor = {}
+        self.filtered_tensors_data = []
         self.search_mode = False
 
     def compose(self) -> ComposeResult:
@@ -185,33 +195,35 @@ class SafeViewApp(App):
         for file_path in files_to_process:
             try:
                 with safe_open(file_path, framework="pt", device="cpu") as f:
+                    # Get all tensor info from header without loading tensors
                     for key in f.keys():
-                        tensor = f.get_tensor(key)
-                        shape = list(tensor.shape)
-                        parameters = tensor.numel()
-                        size_in_bytes = tensor.nelement() * tensor.element_size()
+                        # Get shape and dtype from the header info
+                        shape = f.get_slice(key).get_shape()
+                        dtype = f.get_slice(key).get_dtype()
+                        dtype = _getdtype(dtype)
+
+                        # Calculate parameters and size without loading tensor
+                        parameters = 1
+                        for dim in shape:
+                            parameters *= dim
+                        element_size = torch.tensor(
+                            [], dtype=dtype).element_size()
+                        size_in_bytes = parameters * element_size
                         size_mb = size_in_bytes / 1024 / 1024
+
                         total_size += size_in_bytes
 
                         tensor_info = {
                             "name": key,
-                            "dtype": str(tensor.dtype),
-                            "shape": shape,
+                            "dtype": str(dtype),
+                            "shape": list(shape),
                             "parameters": parameters,
                             "size_mb": size_mb,
-                            "tensor_object": tensor
+                            "needs_loading": True,  # Flag to indicate tensor needs to be loaded for stats
+                            "statistics": None,  # Will load on demand
+                            # Store file path for later loading
+                            "file_path": str(file_path)
                         }
-
-                        if parameters <= 1_000_000_000:  # 限制计算数量
-                            try:
-                                tensor_info["statistics"] = {
-                                    "min": tensor.min().item(),
-                                    "max": tensor.max().item(),
-                                    "mean": tensor.mean().item(),
-                                    "std": tensor.std().item()
-                                }
-                            except:
-                                pass
 
                         tensors_data.append(tensor_info)
                         total_parameters += parameters
@@ -220,7 +232,8 @@ class SafeViewApp(App):
                 return
 
         self.tensors_data = tensors_data
-        self.filtered_tensors_data = tensors_data  # Initialize with all tensors
+        # Initialize with all tensors
+        self.filtered_tensors_data = tensors_data[:]
 
         header = self.query_one(SafetensorsHeader)
         header.file_info = {
@@ -368,18 +381,70 @@ class SafeViewApp(App):
         # Focus back on the table after search
         self.query_one(TensorInfoTable).focus()
 
+    def load_tensor_statistics(self, tensor_info: Dict) -> Dict:
+        """Load tensor statistics on demand"""
+        # Load the full tensor from the file
+        with safe_open(tensor_info["file_path"], framework="pt", device="cpu") as f:
+            tensor = f.get_tensor(tensor_info["name"])
+
+            # Calculate statistics
+            stats = {
+                "min": tensor.min().item(),
+                "max": tensor.max().item(),
+                "mean": tensor.mean().item(),
+                "std": tensor.std().item()
+            }
+
+        # Create a new dictionary with the updated info
+        new_tensor_info = tensor_info.copy()
+        new_tensor_info["statistics"] = stats
+        new_tensor_info["needs_loading"] = False
+
+        return new_tensor_info
+
+    def action_load_tensor_stats(self) -> None:
+        """Load statistics for the currently selected tensor"""
+        table = self.query_one(TensorInfoTable)
+        if not self.filtered_tensors_data or table.cursor_row is None:
+            return
+
+        if 0 <= table.cursor_row < len(self.filtered_tensors_data):
+            self.log(
+                f'action_load_tensor_stats called, cursor_row: {table.cursor_row}')
+            selected_tensor = self.filtered_tensors_data[table.cursor_row]
+
+            # Only load if we haven't loaded the statistics yet
+            if selected_tensor.get("needs_loading", False):
+                # self.notify(f"正在加载 {selected_tensor['name']} 的统计信息...")
+                try:
+                    updated_tensor = self.load_tensor_statistics(
+                        selected_tensor)
+
+                    # Update both the filtered data and the main data to keep them in sync
+                    self.filtered_tensors_data[table.cursor_row] = updated_tensor
+                    # Also update in the main tensors_data list
+                    for i, tensor in enumerate(self.tensors_data):
+                        if tensor["name"] == selected_tensor["name"] and tensor["file_path"] == selected_tensor["file_path"]:
+                            self.tensors_data[i] = updated_tensor
+                            break
+
+                    # Update the detail view to show the new statistics
+                    detail_view = self.query_one(TensorDetailView)
+                    detail_view.tensor_data = updated_tensor
+                    self.selected_tensor = updated_tensor
+                    # self.notify(f"已加载 {selected_tensor['name']} 的统计信息")
+                except Exception as e:
+                    self.notify(f"加载统计信息失败: {str(e)}", severity="error")
+            else:
+                # Statistics already loaded, just update the view
+                detail_view = self.query_one(TensorDetailView)
+                detail_view.tensor_data = selected_tensor
+                self.selected_tensor = selected_tensor
+
     @on(DataTable.RowSelected, "#tensor-table")
     def on_tensor_selected(self, event: DataTable.RowSelected) -> None:
         """处理tensor选择事件"""
-        if not self.filtered_tensors_data:
-            return
-
-        selected_row = event.cursor_row
-        if 0 <= selected_row < len(self.filtered_tensors_data):
-            self.selected_tensor = self.filtered_tensors_data[selected_row]
-            self.log(f"on_tensor_selected: {self.selected_tensor['name']}")
-            detail_view = self.query_one(TensorDetailView)
-            detail_view.tensor_data = self.selected_tensor
+        self.action_load_tensor_stats()
 
 def main():
     """
