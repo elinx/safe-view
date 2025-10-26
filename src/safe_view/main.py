@@ -19,6 +19,7 @@ from typing import Dict, Any, List
 import humanize
 from huggingface_hub import snapshot_download
 from textual.message import Message
+import math
 
 class SafetensorsHeader(Static):
     """Displays header information for the safetensors file."""
@@ -117,6 +118,14 @@ class TensorDetailView(Markdown):
 """
             if "preview" in stats:
                 md_content += f"""\n### Data Preview\n\n```\n{stats['preview']}\n```\n"""
+
+            if "quantiles" in stats and stats["quantiles"]:
+                md_content += "\n### Quantile Distribution\n\n| Percentile | Value     |\n| :--- | :--- |\n"
+                for p, v in stats["quantiles"]:
+                    percentile_str = f"{p*100:.0f}%"
+                    if p == 0.50:
+                        percentile_str = f"**{p*100:.0f}% (Median)**"
+                    md_content += f"| {percentile_str} | {v:<10.4f} |\n"
         else:
             # Show placeholder if statistics are not loaded yet
             md_content += f"""### Data Statistics
@@ -129,58 +138,64 @@ class TensorDetailView(Markdown):
 class TensorHistogramView(Static):
     """Displays a histogram of the tensor's values."""
     tensor_data = reactive(None)
+    log_scale = reactive(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     def on_mount(self) -> None:
-        self.query_one(ProgressBar).visible = False
+        self.query_one(ProgressBar).display = False
 
     def compose(self) -> ComposeResult:
-        yield ProgressBar(classes="invisible")
+        yield ProgressBar()
         yield PlotextPlot(id="plot")
 
     def show_progress(self):
-        self.query_one(ProgressBar).visible = True
+        self.query_one(ProgressBar).display = True
 
     def hide_progress(self):
-        self.query_one(ProgressBar).visible = False
+        self.query_one(ProgressBar).display = False
 
-    def clear_plot(self, data: Dict = None):
+    def _render_plot(self, data: Dict) -> None:
+        """Render the histogram plot based on the current data and scale."""
         plot_widget = self.query_one("#plot", PlotextPlot)
         plot = plot_widget.plt
         plot.clear_figure()
-        plot.title("Histogram")
-        if data and data.get("name"):
-            plot.bar(["Press 'x' to load"], [0])
-        else:
-            plot.bar(["No data"], [0])
-        plot.xlabel("")
-        plot.ylabel("")
-        self.hide_progress()
-        plot_widget.refresh()
 
-    def watch_tensor_data(self, data: Dict) -> None:
-        self.hide_progress()
-        plot_widget = self.query_one("#plot", PlotextPlot)
-        plot = plot_widget.plt
         if data and data.get("statistics") and "histogram" in data["statistics"]:
-            plot.clear_figure()
             hist_data = data["statistics"]["histogram"]
             values = hist_data["values"]
             bins = hist_data["bins"]
-            # Format bin edges to 2 decimal places for use as labels
             x_labels = [f"{b:.2f}" for b in bins[:-1]]
             plot.plot_size(100, 20)
-            plot.bar(x_labels, values, orientation="v", width=0.1)
+
+            if self.log_scale:
+                epsilon = 0.1
+                log_values = [
+                    math.log(v) if v > 0 else epsilon for v in values]
+                plot.bar(x_labels, log_values, orientation="v", width=0.1)
+            else:
+                plot.bar(x_labels, values, orientation="v", width=0.1)
+
             plot.title(f"Value Distribution for {data['name']}")
             plot.xlabel("Value Bins")
             plot.ylabel("Frequency")
         else:
-            self.clear_plot(data)
-            return
-
+            plot.title("Histogram")
+            if data and data.get("name"):
+                plot.bar(["Press 'x' to load"], [0])
+            else:
+                plot.bar(["No data"], [0])
+            plot.xlabel("")
+            plot.ylabel("")
         plot_widget.refresh()
+
+    def watch_tensor_data(self, data: Dict) -> None:
+        self.hide_progress()
+        self._render_plot(data)
+
+    def watch_log_scale(self, log_scale: bool) -> None:
+        self._render_plot(self.tensor_data)
 
 
 class SafeViewApp(App):
@@ -214,6 +229,7 @@ class SafeViewApp(App):
         ("/", "search_tensor", "Search Tensor"),
         ("escape", "exit_search", "Exit Search"),
         ("x", "load_tensor_stats", "Load Tensor Statistics"),
+        ("ctrl+l", "toggle_log_scale", "Toggle Log Scale"),
     ]
 
     def __init__(self, path: Path, title: str):
@@ -502,6 +518,17 @@ class SafeViewApp(App):
             else:
                 stats["sparsity"] = 0
 
+            # Quantile Analysis
+            if tensor.numel() > 0:
+                quantile_points = torch.tensor(
+                    [0.01, 0.10, 0.25, 0.50, 0.75, 0.90, 0.99])
+                quantile_values = torch.quantile(
+                    tensor.float(), quantile_points)
+                stats["quantiles"] = list(
+                    zip(quantile_points.tolist(), quantile_values.tolist()))
+            else:
+                stats["quantiles"] = []
+
             # Data Preview Snippet
             # Use printoptions to safely truncate the tensor for preview
             torch.set_printoptions(
@@ -570,7 +597,7 @@ class SafeViewApp(App):
 
             if selected_tensor.get("needs_loading", False):
                 histogram_view = self.query_one(TensorHistogramView)
-                histogram_view.clear_plot()
+                histogram_view._render_plot(None)
                 histogram_view.show_progress()
                 self.compute_statistics(selected_tensor)
             else:
@@ -584,6 +611,11 @@ class SafeViewApp(App):
     def on_tensor_selected(self, event: DataTable.RowSelected) -> None:
         """Handles tensor selection events."""
         self.action_load_tensor_stats()
+
+    def action_toggle_log_scale(self) -> None:
+        """Toggle the log scale of the histogram."""
+        self.query_one(TensorHistogramView).log_scale = not self.query_one(
+            TensorHistogramView).log_scale
 
 def main():
     """
