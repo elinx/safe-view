@@ -1,6 +1,7 @@
 #left-panel {
     width: 70%;
     /* border: panel $primary; */
+    scrollbar-size: 0 0;
 }
 #right-panel {
     width: 30%;
