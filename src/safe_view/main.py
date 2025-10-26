@@ -169,8 +169,10 @@ class TensorHistogramView(Static):
             hist_data = data["statistics"]["histogram"]
             values = hist_data["values"]
             bins = hist_data["bins"]
+            # Format bin edges to 2 decimal places for use as labels
+            x_labels = [f"{b:.2f}" for b in bins[:-1]]
             plot.plot_size(100, 20)
-            plot.bar(bins, values, orientation="v", width=0.1)
+            plot.bar(x_labels, values, orientation="v", width=0.1)
             plot.title(f"Value Distribution for {data['name']}")
             plot.xlabel("Value Bins")
             plot.ylabel("Frequency")
@@ -455,6 +457,30 @@ class SafeViewApp(App):
         # Focus back on the table after search
         self.query_one(TensorInfoTable).focus()
 
+    def _calculate_histogram_bins(self, tensor: torch.Tensor) -> int:
+        """Calculate the optimal number of histogram bins using the Freedman-Diaconis rule."""
+        n = tensor.numel()
+        if n > 1:
+            q1 = torch.quantile(tensor.float(), 0.25)
+            q3 = torch.quantile(tensor.float(), 0.75)
+            iqr = q3 - q1
+            if iqr > 0:
+                # Freedman-Diaconis rule
+                # https://chat.deepseek.com/a/chat/s/41992b2b-3a17-4594-89d1-3f105fd69218
+                bin_width = (2 * iqr) / (n ** (1/3))
+                num_bins = int(
+                    ((tensor.max() - tensor.min()) / bin_width).ceil().item())
+            else:
+                # Fallback for constant or quantized tensors (sqrt choice)
+                num_bins = int(n ** 0.5)
+        else:
+            num_bins = 1
+        # Cap the number of bins for display purposes
+        num_bins = min(num_bins, 100)
+        if num_bins == 0:
+            num_bins = 1
+        return num_bins
+
     def load_tensor_statistics(self, tensor_info: Dict) -> Dict:
         """Load tensor statistics on demand"""
         # Load the full tensor from the file
@@ -470,7 +496,8 @@ class SafeViewApp(App):
             }
 
             # Calculate histogram
-            values, bins = torch.histogram(tensor.float(), bins=20)
+            num_bins = self._calculate_histogram_bins(tensor)
+            values, bins = torch.histogram(tensor.float(), bins=num_bins)
             stats["histogram"] = {
                 "values": values.tolist(),
                 "bins": bins.tolist(),
