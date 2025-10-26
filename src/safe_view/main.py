@@ -133,15 +133,18 @@ class TensorHistogramView(Static):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    def on_mount(self) -> None:
+        self.query_one(ProgressBar).visible = False
+
     def compose(self) -> ComposeResult:
         yield ProgressBar(classes="invisible")
         yield PlotextPlot(id="plot")
 
     def show_progress(self):
-        self.query_one(ProgressBar).remove_class("invisible")
+        self.query_one(ProgressBar).visible = True
 
     def hide_progress(self):
-        self.query_one(ProgressBar).add_class("invisible")
+        self.query_one(ProgressBar).visible = False
 
     def clear_plot(self, data: Dict = None):
         plot_widget = self.query_one("#plot", PlotextPlot)
@@ -489,6 +492,8 @@ class SafeViewApp(App):
         except Exception as e:
             self.notify(
                 f"Failed to load statistics: {str(e)}", severity="error")
+            # Post back the original tensor_info on failure to ensure the UI updates and hides the progress bar
+            self.post_message(self.HistogramData(tensor_info))
 
     def on_safe_view_app_histogram_data(self, message: HistogramData) -> None:
         """Called when histogram data is ready."""
