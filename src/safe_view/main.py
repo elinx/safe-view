@@ -143,20 +143,26 @@ class TensorHistogramView(Static):
     def hide_progress(self):
         self.query_one(ProgressBar).add_class("invisible")
 
-    def clear_plot(self):
-        plot = self.query_one("#plot", PlotextPlot).plt
+    def clear_plot(self, data: Dict = None):
+        plot_widget = self.query_one("#plot", PlotextPlot)
+        plot = plot_widget.plt
         plot.clear_figure()
         plot.title("Histogram")
-        plot.bar(["No data"], [0])
+        if data and data.get("name"):
+            plot.bar(["Press 'x' to load"], [0])
+        else:
+            plot.bar(["No data"], [0])
         plot.xlabel("")
         plot.ylabel("")
         self.hide_progress()
+        plot_widget.refresh()
 
     def watch_tensor_data(self, data: Dict) -> None:
         self.hide_progress()
-        plot = self.query_one("#plot", PlotextPlot).plt
-        plot.clear_figure()
+        plot_widget = self.query_one("#plot", PlotextPlot)
+        plot = plot_widget.plt
         if data and data.get("statistics") and "histogram" in data["statistics"]:
+            plot.clear_figure()
             hist_data = data["statistics"]["histogram"]
             values = hist_data["values"]
             bins = hist_data["bins"]
@@ -166,7 +172,10 @@ class TensorHistogramView(Static):
             plot.xlabel("Value Bins")
             plot.ylabel("Frequency")
         else:
-            self.clear_plot()
+            self.clear_plot(data)
+            return
+
+        plot_widget.refresh()
 
 
 class SafeViewApp(App):
