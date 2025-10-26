@@ -1,11 +1,11 @@
 import argparse
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import (
     Header, Footer, DataTable, Static, Button,
     Input, Label, SelectionList, TabbedContent,
-    TabPane, Markdown
+    TabPane, Markdown, ProgressBar
 )
 from textual_plotext import PlotextPlot
 from textual.reactive import reactive
@@ -18,6 +18,7 @@ import torch
 from typing import Dict, Any, List
 import humanize
 from huggingface_hub import snapshot_download
+from textual.message import Message
 
 class SafetensorsHeader(Static):
     """Displays header information for the safetensors file."""
@@ -133,9 +134,26 @@ class TensorHistogramView(Static):
         super().__init__(**kwargs)
 
     def compose(self) -> ComposeResult:
+        yield ProgressBar(classes="invisible")
         yield PlotextPlot(id="plot")
 
+    def show_progress(self):
+        self.query_one(ProgressBar).remove_class("invisible")
+
+    def hide_progress(self):
+        self.query_one(ProgressBar).add_class("invisible")
+
+    def clear_plot(self):
+        plot = self.query_one("#plot", PlotextPlot).plt
+        plot.clear_figure()
+        plot.title("Histogram")
+        plot.bar(["No data"], [0])
+        plot.xlabel("")
+        plot.ylabel("")
+        self.hide_progress()
+
     def watch_tensor_data(self, data: Dict) -> None:
+        self.hide_progress()
         plot = self.query_one("#plot", PlotextPlot).plt
         plot.clear_figure()
         if data and data.get("statistics") and "histogram" in data["statistics"]:
@@ -144,20 +162,21 @@ class TensorHistogramView(Static):
             bins = hist_data["bins"]
             plot.plot_size(100, 20)
             plot.bar(bins, values, orientation="v", width=0.1)
-            title = f"Value Distribution for {data['name']}"
-            if hist_data.get("is_sampled", False):
-                title += " (sampled)"
-            plot.title(title)
+            plot.title(f"Value Distribution for {data['name']}")
             plot.xlabel("Value Bins")
             plot.ylabel("Frequency")
         else:
-            plot.title("Histogram")
-            plot.bar(["No data"], [0])
-            plot.xlabel("")
-            plot.ylabel("")
+            self.clear_plot()
 
 
 class SafeViewApp(App):
+    class HistogramData(Message):
+        """Message with histogram data."""
+
+        def __init__(self, tensor_data: Dict):
+            self.tensor_data = tensor_data
+            super().__init__()
+
     """A terminal application to view safetensors files."""
 
     TITLE = "Safe View"
@@ -439,18 +458,10 @@ class SafeViewApp(App):
             }
 
             # Calculate histogram
-            is_sampled = False
-            tensor_for_hist = tensor.float()
-            if tensor.numel() > 1_000_000:
-                is_sampled = True
-                tensor_for_hist = tensor_for_hist.view(
-                    -1)[torch.randperm(tensor.numel())[:1_000_000]]
-
-            values, bins = torch.histogram(tensor_for_hist, bins=20)
+            values, bins = torch.histogram(tensor.float(), bins=20)
             stats["histogram"] = {
                 "values": values.tolist(),
                 "bins": bins.tolist(),
-                "is_sampled": is_sampled,
             }
 
         # Create a new dictionary with the updated info
@@ -460,6 +471,35 @@ class SafeViewApp(App):
 
         return new_tensor_info
 
+    @work(exclusive=True, group="stats", thread=True)
+    def compute_statistics(self, tensor_info: Dict) -> None:
+        """Worker to compute tensor statistics in the background."""
+        try:
+            updated_tensor = self.load_tensor_statistics(tensor_info)
+            self.post_message(self.HistogramData(updated_tensor))
+        except Exception as e:
+            self.notify(
+                f"Failed to load statistics: {str(e)}", severity="error")
+
+    def on_safe_view_app_histogram_data(self, message: HistogramData) -> None:
+        """Called when histogram data is ready."""
+        table = self.query_one(TensorInfoTable)
+        if table.cursor_row is None:
+            return
+
+        updated_tensor = message.tensor_data
+        self.filtered_tensors_data[table.cursor_row] = updated_tensor
+        for i, tensor in enumerate(self.tensors_data):
+            if tensor["name"] == updated_tensor["name"] and tensor["file_path"] == updated_tensor["file_path"]:
+                self.tensors_data[i] = updated_tensor
+                break
+
+        detail_view = self.query_one(TensorDetailView)
+        detail_view.tensor_data = updated_tensor
+        histogram_view = self.query_one(TensorHistogramView)
+        histogram_view.tensor_data = updated_tensor
+        self.selected_tensor = updated_tensor
+
     def action_load_tensor_stats(self) -> None:
         """Load statistics for the currently selected tensor"""
         table = self.query_one(TensorInfoTable)
@@ -467,38 +507,14 @@ class SafeViewApp(App):
             return
 
         if 0 <= table.cursor_row < len(self.filtered_tensors_data):
-            self.log(
-                f'action_load_tensor_stats called, cursor_row: {table.cursor_row}')
             selected_tensor = self.filtered_tensors_data[table.cursor_row]
 
-            # Only load if we haven't loaded the statistics yet
             if selected_tensor.get("needs_loading", False):
-                # self.notify(f"Loading statistics for {selected_tensor['name']}...")
-                try:
-                    updated_tensor = self.load_tensor_statistics(
-                        selected_tensor)
-
-                    # Update both the filtered data and the main data to keep them in sync
-                    self.filtered_tensors_data[table.cursor_row] = updated_tensor
-                    # Also update in the main tensors_data list
-                    for i, tensor in enumerate(self.tensors_data):
-                        if tensor["name"] == selected_tensor["name"] and tensor["file_path"] == selected_tensor["file_path"]:
-                            self.tensors_data[i] = updated_tensor
-                            break
-
-                    # Update the detail view to show the new statistics
-                    detail_view = self.query_one(TensorDetailView)
-                    detail_view.tensor_data = updated_tensor
-                    histogram_view = self.query_one(TensorHistogramView)
-                    histogram_view.tensor_data = updated_tensor
-                    self.selected_tensor = updated_tensor
-                    # self.notify(
-                    #     f"Loaded statistics for {selected_tensor['name']}")
-                except Exception as e:
-                    self.notify(
-                        f"Failed to load statistics: {str(e)}", severity="error")
+                histogram_view = self.query_one(TensorHistogramView)
+                histogram_view.clear_plot()
+                histogram_view.show_progress()
+                self.compute_statistics(selected_tensor)
             else:
-                # Statistics already loaded, just update the view
                 detail_view = self.query_one(TensorDetailView)
                 detail_view.tensor_data = selected_tensor
                 histogram_view = self.query_one(TensorHistogramView)
