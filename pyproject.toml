@@ -10,6 +10,7 @@ dependencies = [
     "humanize",
     "huggingface-hub",
     "torch",
+    "textual-plotext",
 ]
 authors = [
     {name = "Elinx"},

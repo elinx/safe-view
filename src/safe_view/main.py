@@ -7,6 +7,7 @@ from textual.widgets import (
     Input, Label, SelectionList, TabbedContent,
     TabPane, Markdown
 )
+from textual_plotext import PlotextPlot
 from textual.reactive import reactive
 import json
 import struct
@@ -123,6 +124,39 @@ class TensorDetailView(Markdown):
 
         self.update(md_content)
 
+
+class TensorHistogramView(Static):
+    """Displays a histogram of the tensor's values."""
+    tensor_data = reactive(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def compose(self) -> ComposeResult:
+        yield PlotextPlot(id="plot")
+
+    def watch_tensor_data(self, data: Dict) -> None:
+        plot = self.query_one("#plot", PlotextPlot).plt
+        plot.clear_figure()
+        if data and data.get("statistics") and "histogram" in data["statistics"]:
+            hist_data = data["statistics"]["histogram"]
+            values = hist_data["values"]
+            bins = hist_data["bins"]
+            plot.plot_size(100, 20)
+            plot.bar(bins, values, orientation="v", width=0.1)
+            title = f"Value Distribution for {data['name']}"
+            if hist_data.get("is_sampled", False):
+                title += " (sampled)"
+            plot.title(title)
+            plot.xlabel("Value Bins")
+            plot.ylabel("Frequency")
+        else:
+            plot.title("Histogram")
+            plot.bar(["No data"], [0])
+            plot.xlabel("")
+            plot.ylabel("")
+
+
 class SafeViewApp(App):
     """A terminal application to view safetensors files."""
 
@@ -168,7 +202,11 @@ class SafeViewApp(App):
                     yield Input(placeholder="Search for tensor name... (Press Escape to exit)", id="search-input", classes="invisible")
                     yield TensorInfoTable(id="tensor-table")
                 with VerticalScroll(id="right-panel"):
-                    yield TensorDetailView(id="tensor-detail")
+                    with TabbedContent(initial="details-tab"):
+                        with TabPane("Details", id="details-tab"):
+                            yield TensorDetailView(id="tensor-detail")
+                        with TabPane("Histogram", id="histogram-tab"):
+                            yield TensorHistogramView(id="tensor-histogram")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -262,6 +300,8 @@ class SafeViewApp(App):
             self.log(f"selected_tensor: {self.selected_tensor['name']}")
             detail_view = self.query_one(TensorDetailView)
             detail_view.tensor_data = self.selected_tensor
+            histogram_view = self.query_one(TensorHistogramView)
+            histogram_view.tensor_data = self.selected_tensor
 
     def action_cursor_down(self) -> None:
         """Move cursor down in the table."""
@@ -395,7 +435,22 @@ class SafeViewApp(App):
                 "min": tensor.min().item(),
                 "max": tensor.max().item(),
                 "mean": tensor.mean().item(),
-                "std": tensor.std().item()
+                "std": tensor.std().item(),
+            }
+
+            # Calculate histogram
+            is_sampled = False
+            tensor_for_hist = tensor.float()
+            if tensor.numel() > 1_000_000:
+                is_sampled = True
+                tensor_for_hist = tensor_for_hist.view(
+                    -1)[torch.randperm(tensor.numel())[:1_000_000]]
+
+            values, bins = torch.histogram(tensor_for_hist, bins=20)
+            stats["histogram"] = {
+                "values": values.tolist(),
+                "bins": bins.tolist(),
+                "is_sampled": is_sampled,
             }
 
         # Create a new dictionary with the updated info
@@ -434,6 +489,8 @@ class SafeViewApp(App):
                     # Update the detail view to show the new statistics
                     detail_view = self.query_one(TensorDetailView)
                     detail_view.tensor_data = updated_tensor
+                    histogram_view = self.query_one(TensorHistogramView)
+                    histogram_view.tensor_data = updated_tensor
                     self.selected_tensor = updated_tensor
                     # self.notify(
                     #     f"Loaded statistics for {selected_tensor['name']}")
@@ -444,6 +501,8 @@ class SafeViewApp(App):
                 # Statistics already loaded, just update the view
                 detail_view = self.query_one(TensorDetailView)
                 detail_view.tensor_data = selected_tensor
+                histogram_view = self.query_one(TensorHistogramView)
+                histogram_view.tensor_data = selected_tensor
                 self.selected_tensor = selected_tensor
 
     @on(DataTable.RowSelected, "#tensor-table")
