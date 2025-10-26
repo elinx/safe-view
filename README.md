@@ -16,7 +16,12 @@ A terminal application to view safetensors files. SafeView provides a clean, int
 
 ## Installation
 
-### Using pip:
+### From PyPI:
+```shell
+pip install safe-view
+```
+
+### Using pip (from local directory):
 ```shell
 pip install .
 ```
