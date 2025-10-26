@@ -19,7 +19,7 @@ import humanize
 from huggingface_hub import snapshot_download
 
 class SafetensorsHeader(Static):
-    """显示safetensors文件头部信息"""
+    """Displays header information for the safetensors file."""
 
     file_info = reactive({
         "filename": "",
@@ -33,18 +33,18 @@ class SafetensorsHeader(Static):
 
     def render(self) -> str:
         if not self.file_info["filename"]:
-            return "未选择文件"
+            return "No file selected"
 
         info = self.file_info
         return (
-            f"文件: {info['filename']} | "
-            f"大小: {info['file_size']/1024/1024:.2f} MB | "
-            f"Tensor数量: {info['tensor_count']} | "
-            f"总参数量: {info['total_parameters']:,}"
+            f"File: {info['filename']} | "
+            f"Size: {info['file_size']/1024/1024:.2f} MB | "
+            f"Tensors: {info['tensor_count']} | "
+            f"Total Parameters: {info['total_parameters']:,}"
         )
 
 class TensorInfoTable(DataTable):
-    """显示tensors信息的表格"""
+    """A table to display tensor information."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -54,11 +54,11 @@ class TensorInfoTable(DataTable):
 
     def on_mount(self) -> None:
         self.add_columns(
-            "Tensor名称",
-            "数据类型",
-            "形状",
-            "参数量",
-            "大小(MB)"
+            "Tensor Name",
+            "Data Type",
+            "Shape",
+            "Parameters",
+            "Size (MB)"
         )
 
     def update_table(self, tensors_data: List[Dict]) -> None:
@@ -76,7 +76,7 @@ class TensorInfoTable(DataTable):
             )
 
 class TensorDetailView(Markdown):
-    """显示选中tensor的详细信息"""
+    """Displays detailed information about the selected tensor."""
     tensor_data = reactive(None)
 
     def __init__(self, **kwargs):
@@ -85,39 +85,40 @@ class TensorDetailView(Markdown):
     def watch_tensor_data(self, data: Dict) -> None:
         self.log(f"watch_tensor_data received: {data}")
         if not data:
-            self.update("选择左侧表格中的tensor查看详细信息")
+            self.update(
+                "Select a tensor from the table on the left to see details")
             return
 
-        # 计算统计信息
+        # Calculate statistics
         shape_str = " × ".join(map(str, data["shape"]))
         total_elements = data["parameters"]
 
         md_content = f"""## Tensor: {data['name']}
 
-### 基本信息
-- **数据类型**: {data['dtype']}
-- **形状**: {shape_str}
-- **总元素数**: {total_elements:,}
-- **内存占用**: {data['size_mb']:.2f} MB
+### Basic Information
+- **Data Type**: {data['dtype']}
+- **Shape**: {shape_str}
+- **Total Elements**: {total_elements:,}
+- **Memory Usage**: {data['size_mb']:.2f} MB
 
 """
 
         # Check if statistics are already loaded
         if data.get("statistics") is not None:
             stats = data["statistics"]
-            md_content += f"""### 数据统计
-- **最小值**: {stats.get('min', 'N/A'):.6f}
-- **最大值**: {stats.get('max', 'N/A'):.6f}
-- **平均值**: {stats.get('mean', 'N/A'):.6f}
-- **标准差**: {stats.get('std', 'N/A'):.6f}
+            md_content += f"""### Data Statistics
+- **Min**: {stats.get('min', 'N/A'):.6f}
+- **Max**: {stats.get('max', 'N/A'):.6f}
+- **Mean**: {stats.get('mean', 'N/A'):.6f}
+- **Std Dev**: {stats.get('std', 'N/A'):.6f}
 """
         else:
             # Show placeholder if statistics are not loaded yet
-            md_content += f"""### 数据统计
-- **最小值**: <等待加载... 按Enter键加载统计信息>
-- **最大值**: <等待加载... 按Enter键加载统计信息>
-- **平均值**: <等待加载... 按Enter键加载统计信息>
-- **标准差**: <等待加载... 按Enter键加载统计信息>
+            md_content += f"""### Data Statistics
+- **Min**: <Loading... Press Enter to load statistics>
+- **Max**: <Loading... Press Enter to load statistics>
+- **Mean**: <Loading... Press Enter to load statistics>
+- **Std Dev**: <Loading... Press Enter to load statistics>
 """
 
         self.update(md_content)
@@ -164,7 +165,7 @@ class SafeViewApp(App):
         with Container(id="app-body"):
             with Horizontal():
                 with VerticalScroll(id="left-panel"):
-                    yield Input(placeholder="输入tensor名称进行搜索... (按Escape退出)", id="search-input", classes="invisible")
+                    yield Input(placeholder="Search for tensor name... (Press Escape to exit)", id="search-input", classes="invisible")
                     yield TensorInfoTable(id="tensor-table")
                 with VerticalScroll(id="right-panel"):
                     yield TensorDetailView(id="tensor-detail")
@@ -172,8 +173,8 @@ class SafeViewApp(App):
 
     def on_mount(self) -> None:
         """Called when the app is mounted."""
-        self.title = "Safetensors文件查看器"
-        self.sub_title = "可视化深度学习模型权重"
+        self.title = "Safetensors File Viewer"
+        self.sub_title = "Visualize deep learning model weights"
         self.process_safetensors_file()
 
     def on_ready(self) -> None:
@@ -181,7 +182,7 @@ class SafeViewApp(App):
         self.update_detail_view()
 
     def process_safetensors_file(self) -> None:
-        """处理safetensors文件"""
+        """Processes the safetensors file."""
         tensors_data = []
         total_parameters = 0
         total_size = 0
@@ -228,7 +229,8 @@ class SafeViewApp(App):
                         tensors_data.append(tensor_info)
                         total_parameters += parameters
             except Exception as e:
-                self.notify(f"解析文件失败: {str(e)}", severity="error")
+                self.notify(
+                    f"Failed to parse file: {str(e)}", severity="error")
                 return
 
         self.tensors_data = tensors_data
@@ -246,7 +248,8 @@ class SafeViewApp(App):
         table = self.query_one("#tensor-table", TensorInfoTable)
         table.update_table(self.filtered_tensors_data)
 
-        self.notify(f"成功加载文件，包含 {len(tensors_data)} 个tensors")
+        self.notify(
+            f"Successfully loaded file with {len(tensors_data)} tensors")
 
     def update_detail_view(self) -> None:
         """Update the detail view with the selected tensor."""
@@ -415,7 +418,7 @@ class SafeViewApp(App):
 
             # Only load if we haven't loaded the statistics yet
             if selected_tensor.get("needs_loading", False):
-                # self.notify(f"正在加载 {selected_tensor['name']} 的统计信息...")
+                # self.notify(f"Loading statistics for {selected_tensor['name']}...")
                 try:
                     updated_tensor = self.load_tensor_statistics(
                         selected_tensor)
@@ -432,9 +435,11 @@ class SafeViewApp(App):
                     detail_view = self.query_one(TensorDetailView)
                     detail_view.tensor_data = updated_tensor
                     self.selected_tensor = updated_tensor
-                    # self.notify(f"已加载 {selected_tensor['name']} 的统计信息")
+                    # self.notify(
+                    #     f"Loaded statistics for {selected_tensor['name']}")
                 except Exception as e:
-                    self.notify(f"加载统计信息失败: {str(e)}", severity="error")
+                    self.notify(
+                        f"Failed to load statistics: {str(e)}", severity="error")
             else:
                 # Statistics already loaded, just update the view
                 detail_view = self.query_one(TensorDetailView)
@@ -443,7 +448,7 @@ class SafeViewApp(App):
 
     @on(DataTable.RowSelected, "#tensor-table")
     def on_tensor_selected(self, event: DataTable.RowSelected) -> None:
-        """处理tensor选择事件"""
+        """Handles tensor selection events."""
         self.action_load_tensor_stats()
 
 def main():
