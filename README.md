@@ -1,6 +1,8 @@
 # SafeView
 
 A terminal application to view safetensors files. SafeView provides a clean, interactive terminal interface for exploring safetensors files and Hugging Face models.
+![safe-view](./assets/screenshot_1.svg)
+![safe-view search](./assets/screenshot_2.svg)
 
 ## Features
 
