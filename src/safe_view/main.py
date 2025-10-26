@@ -113,14 +113,12 @@ class TensorDetailView(Markdown):
 - **Max**: {stats.get('max', 'N/A'):.6f}
 - **Mean**: {stats.get('mean', 'N/A'):.6f}
 - **Std Dev**: {stats.get('std', 'N/A'):.6f}
+- **Sparsity**: {stats.get('sparsity', 0):.2f}%
 """
         else:
             # Show placeholder if statistics are not loaded yet
             md_content += f"""### Data Statistics
-- **Min**: <Loading... Press Enter to load statistics>
-- **Max**: <Loading... Press Enter to load statistics>
-- **Mean**: <Loading... Press Enter to load statistics>
-- **Std Dev**: <Loading... Press Enter to load statistics>
+<Loading... Press Enter to load statistics>
 """
 
         self.update(md_content)
@@ -494,6 +492,13 @@ class SafeViewApp(App):
                 "mean": tensor.mean().item(),
                 "std": tensor.std().item(),
             }
+
+            # Sparsity Calculation
+            if tensor.numel() > 0:
+                non_zero = torch.count_nonzero(tensor).item()
+                stats["sparsity"] = (1 - (non_zero / tensor.numel())) * 100
+            else:
+                stats["sparsity"] = 0
 
             # Calculate histogram
             num_bins = self._calculate_histogram_bins(tensor)
