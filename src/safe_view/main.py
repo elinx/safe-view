@@ -115,6 +115,8 @@ class TensorDetailView(Markdown):
 - **Std Dev**: {stats.get('std', 'N/A'):.6f}
 - **Sparsity**: {stats.get('sparsity', 0):.2f}%
 """
+            if "preview" in stats:
+                md_content += f"""\n### Data Preview\n\n```\n{stats['preview']}\n```\n"""
         else:
             # Show placeholder if statistics are not loaded yet
             md_content += f"""### Data Statistics
@@ -499,6 +501,17 @@ class SafeViewApp(App):
                 stats["sparsity"] = (1 - (non_zero / tensor.numel())) * 100
             else:
                 stats["sparsity"] = 0
+
+            # Data Preview Snippet
+            # Use printoptions to safely truncate the tensor for preview
+            torch.set_printoptions(
+                precision=4, linewidth=80, sci_mode=False)
+            if tensor.ndim == 0:
+                preview_str = str(tensor.item())
+            else:
+                preview_str = str(tensor)
+            stats["preview"] = preview_str
+            torch.set_printoptions(profile="default")  # Reset to default
 
             # Calculate histogram
             num_bins = self._calculate_histogram_bins(tensor)
