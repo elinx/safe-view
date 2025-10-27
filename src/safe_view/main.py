@@ -461,15 +461,11 @@ class SafeViewApp(App):
             detail_view = self.query_one(TensorDetailView)
             detail_view.tensor_data = {}
 
-    @on(Input.Changed, "#search-input")
-    def on_search_input_changed(self, event: Input.Changed) -> None:
-        """Handle real-time search input changes."""
-        if self.search_mode:
-            self.filter_tensors(event.value)
-
     @on(Input.Submitted, "#search-input")
     def on_search_input_submitted(self, event: Input.Submitted) -> None:
         """Handle search input submission."""
+        if self.search_mode:
+            self.filter_tensors(event.value)
         # Focus back on the table after search
         self.query_one(TensorInfoTable).focus()
 
