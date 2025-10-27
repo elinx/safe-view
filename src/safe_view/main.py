@@ -229,6 +229,7 @@ class SafeViewApp(App):
         ("/", "search_tensor", "Search Tensor"),
         ("escape", "exit_search", "Exit Search"),
         ("x", "load_tensor_stats", "Load Tensor Statistics"),
+        ("enter", "refresh_selected_tensor", "Refresh Selected Tensor"),
         ("ctrl+l", "toggle_log_scale", "Toggle Log Scale"),
     ]
 
@@ -602,6 +603,10 @@ class SafeViewApp(App):
                 histogram_view = self.query_one(TensorHistogramView)
                 histogram_view.tensor_data = selected_tensor
                 self.selected_tensor = selected_tensor
+
+    def action_refresh_selected_tensor(self) -> None:
+        """Refresh the currently selected tensor (triggered by Enter key from anywhere)"""
+        self.action_load_tensor_stats()
 
     @on(DataTable.RowSelected, "#tensor-table")
     def on_tensor_selected(self, event: DataTable.RowSelected) -> None:
