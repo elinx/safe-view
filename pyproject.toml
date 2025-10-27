@@ -1,6 +1,6 @@
 [project]
 name = "safe-view"
-version = "0.3.0"
+version = "0.3.1"
 description = "A terminal application to view safetensors files"
 readme = "README.md"
 requires-python = ">=3.9"
