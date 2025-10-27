@@ -138,7 +138,7 @@ class TensorDetailView(Markdown):
 class TensorHistogramView(Static):
     """Displays a histogram of the tensor's values."""
     tensor_data = reactive(None)
-    log_scale = reactive(False)
+    log_scale = reactive(True)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
