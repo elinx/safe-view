@@ -202,7 +202,7 @@ class QuantConfig:
         self.level = level
 
 
-class QuantConfigScreen(Screen):
+class QuantConfigScreen(ModalScreen):
 
     BINDINGS = [
         ("j", "cursor_down", "Cursor Down"),
@@ -242,15 +242,16 @@ class QuantConfigScreen(Screen):
                 classes="config-main"
             ),
             Vertical(
-                Static("Live Preview", classes="preview-title"),
+                Static("Live Preview", classes="quant-preview-title"),
                 Static(id="config-preview"),
-                classes="preview-container"
+                classes="quant-preview-container"
             ),
             Horizontal(
                 Button("Apply", id="select-btn", variant="primary"),
                 Button("Back", id="back-btn", variant="default"),
                 classes="button-group"
-            )
+            ),
+            classes="preview-container"
         )
 
     def on_mount(self) -> None:

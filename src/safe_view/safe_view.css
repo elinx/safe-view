@@ -37,13 +37,13 @@ Input {
 
 .config-list-container {
     width: 50%;
-    border: round $accent;
+    border: round $background-lighten-2;
     margin: 1;
 }
 
 .detail-container {
     width: 50%;
-    border: round $accent;
+    border: round $background-lighten-2;
     margin: 1;
     padding: 0 1;
 }
@@ -83,14 +83,14 @@ Input {
     border: round $primary;
 }
 
-.preview-container {
-    border: round $accent;
+.quant-preview-container {
+    border: round $background-lighten-2;
     margin: 1;
     padding: 0 1;
     height: auto;
 }
 
-.preview-title {
+.quant-preview-title {
     color: $text-muted;
     padding: 0 1;
     text-align: left;
@@ -104,6 +104,10 @@ Input {
 .button-group {
     height: auto;
     margin-top: 1;
+    align: center middle;
+}
+
+QuantConfigScreen {
     align: center middle;
 }
 
@@ -123,7 +127,7 @@ TensorPreviewScreen {
 .preview-container {
     width: 90%;
     height: 90%;
-    border: round $background-lighten-2;
+    border: round $accent;
     layout: vertical;
 }
 
@@ -135,7 +139,7 @@ TensorPreviewScreen {
 
 #preview-table {
     height: 1fr;
-    border: solid $accent;
+    border: solid $primary;
     max-width: 100%;
     overflow-x: auto;
 }
