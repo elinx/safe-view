@@ -431,6 +431,7 @@ class SafeViewApp(App):
         self.selected_tensor = {}
         self.filtered_tensors_data = []
         self.search_mode = False
+        self.pending_quantization_config: Dict[str, Any] = None
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -783,6 +784,11 @@ class SafeViewApp(App):
         histogram_view.tensor_data = updated_tensor
         self.selected_tensor = updated_tensor
 
+        # If there's a pending quantization request, execute it now
+        if self.pending_quantization_config:
+            self.quantize_tensor(self.pending_quantization_config)
+            self.pending_quantization_config = None
+
     def action_load_tensor_stats(self) -> None:
         """Load statistics for the currently selected tensor"""
         table = self.query_one(TensorInfoTable)
@@ -824,13 +830,17 @@ class SafeViewApp(App):
             self.notify("No tensor selected.", severity="error")
             return
 
-        if self.selected_tensor.get("needs_loading", True):
-            self.notify("Tensor statistics must be loaded first. Press 'x' or 'Enter'.", severity="warning")
-            return
-
         def quantization_callback(config: Dict[str, Any]):
             if config:
-                self.quantize_tensor(config)
+                if self.selected_tensor.get("needs_loading", True):
+                    self.pending_quantization_config = config
+                    histogram_view = self.query_one(TensorHistogramView)
+                    histogram_view._render_plot(None)
+                    histogram_view.show_progress()
+                    self.compute_statistics(self.selected_tensor)
+                    self.notify("Loading tensor statistics for quantization...", severity="information")
+                else:
+                    self.quantize_tensor(config)
 
         self.push_screen(QuantConfigScreen(), quantization_callback)
 
