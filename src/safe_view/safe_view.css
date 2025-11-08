@@ -114,3 +114,33 @@ Input {
 OptionList:focus {
     border: double $primary;
 }
+
+/* Tensor Preview Screen Styles */
+TensorPreviewScreen {
+    align: center middle;
+}
+
+.preview-container {
+    width: 90%;
+    height: 90%;
+    border: round $accent;
+    padding: 1;
+    layout: vertical;
+}
+
+.tensor-name {
+    text-style: bold;
+    margin-bottom: 0;
+    text-align: left;
+}
+
+#preview-table {
+    height: 1fr;
+    border: solid $accent;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+#preview-table:focus {
+    border: double $primary;
+}

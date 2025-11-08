@@ -420,6 +420,7 @@ class SafeViewApp(App):
         ("escape", "exit_search", "Exit Search"),
         ("x", "load_tensor_stats", "Load Tensor Statistics"),
         ("enter", "refresh_selected_tensor", "Refresh Selected Tensor"),
+        ("space", "show_tensor_preview", "Preview Tensor Data"),
         ("ctrl+l", "toggle_log_scale", "Toggle Log Scale"),
     ]
 
@@ -638,6 +639,29 @@ class SafeViewApp(App):
         # self.notify("Exited search mode", timeout=1)
         self.query_one(TensorInfoTable).focus()
 
+    def action_show_tensor_preview(self) -> None:
+        """Show the tensor preview screen for the currently selected tensor."""
+        table = self.query_one(TensorInfoTable)
+        if not self.filtered_tensors_data or table.cursor_row is None:
+            self.notify("No tensor selected.", severity="warning")
+            return
+
+        if 0 <= table.cursor_row < len(self.filtered_tensors_data):
+            selected_tensor = self.filtered_tensors_data[table.cursor_row]
+            
+            # If tensor statistics haven't been loaded yet, load them first
+            if selected_tensor.get("needs_loading", True):
+                self.notify("Loading tensor data for preview...", severity="information")
+                
+                # Load the stats in the background
+                self.compute_statistics(selected_tensor)
+                
+                # We'll handle showing the preview in the histogram data handler
+                self._pending_preview = True
+            else:
+                # Show the preview screen directly
+                self.push_screen(TensorPreviewScreen(selected_tensor))
+
     def filter_tensors(self, search_term: str) -> None:
         """Filter tensors based on search term."""
         if not search_term:
@@ -784,8 +808,12 @@ class SafeViewApp(App):
         histogram_view.tensor_data = updated_tensor
         self.selected_tensor = updated_tensor
 
+        # If there's a pending preview request, show it now
+        if hasattr(self, '_pending_preview') and self._pending_preview:
+            self._pending_preview = False
+            self.push_screen(TensorPreviewScreen(updated_tensor))
         # If there's a pending quantization request, execute it now
-        if self.pending_quantization_config:
+        elif self.pending_quantization_config:
             self.quantize_tensor(self.pending_quantization_config)
             self.pending_quantization_config = None
 
@@ -877,6 +905,79 @@ class SafeViewApp(App):
             self.notify(str(e), severity="error")
         except Exception as e:
             self.notify(f"An unexpected error occurred: {e}", severity="error")
+
+
+class TensorPreviewScreen(ModalScreen):
+    """A screen to preview tensor data in a table format."""
+    
+    BINDINGS = [
+        ("escape", "dismiss_screen", "Close"),
+        ("space", "dismiss_screen", "Close"),
+    ]
+
+    def __init__(self, tensor_data: Dict, **kwargs):
+        super().__init__(**kwargs)
+        self.tensor_data = tensor_data
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets for the screen."""
+        yield Vertical(
+            Static(f"Tensor: {self.tensor_data['name']}", classes="tensor-name"),
+            DataTable(id="preview-table", show_header=True, zebra_stripes=True),
+            classes="preview-container"
+        )
+
+    def on_mount(self) -> None:
+        """Initialize the table with tensor data."""
+        table = self.query_one("#preview-table", DataTable)
+        
+        # Load the full tensor data
+        with safe_open(self.tensor_data["file_path"], framework="pt", device="cpu") as f:
+            tensor = f.get_tensor(self.tensor_data["name"])
+        
+        # Flatten the tensor for display
+        flattened_tensor = tensor.flatten()
+        
+        # Use 8 columns by default
+        num_cols = 8
+        
+        # Create header row with column indices
+        header_row = ["Addr"]
+        for col in range(num_cols):
+            header_row.append(f"{col:02d}")
+        table.add_columns(*header_row)
+        
+        # Determine how many digits to show based on the data type
+        tensor_dtype = tensor.dtype
+        if tensor_dtype in [torch.float32, torch.bfloat16, torch.float16]:
+            format_str = "{:.6f}"
+        elif tensor_dtype in [torch.int32, torch.int64, torch.int16, torch.int8]:
+            format_str = "{}"
+        elif tensor_dtype in [torch.uint8, torch.uint16, torch.uint32, torch.uint64]:
+            format_str = "{}"
+        else:
+            format_str = "{:.6f}"  # Default to float format
+        
+        # Add rows to the table in a hex-editor style format
+        max_display = min(len(flattened_tensor), 2048)  # Limit to 2048 elements to prevent overwhelming the UI
+        for row_idx in range(0, max_display, num_cols):
+            row_data = [f"{row_idx:04d}"]  # Row index in decimal format
+            for col_idx in range(num_cols):
+                flat_idx = row_idx + col_idx
+                if flat_idx < len(flattened_tensor):
+                    value = flattened_tensor[flat_idx].item()
+                    row_data.append(format_str.format(value))
+                else:
+                    # If we've run out of tensor data, add empty cells
+                    row_data.append("--")
+            table.add_row(*row_data)
+        
+        # Focus the table for scrolling
+        table.focus()
+
+    def action_dismiss_screen(self) -> None:
+        """Dismiss the screen."""
+        self.dismiss()
 
 
 def main():
