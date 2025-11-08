@@ -49,11 +49,9 @@ Input {
 }
 
 .config-title {
-    background: $accent;
-    color: $text;
-    padding: 1;
-    text-style: bold;
-    text-align: center;
+    color: $text-muted;
+    padding: 0 1;
+    text-align: left;
 }
 
 .config-list {
@@ -93,11 +91,9 @@ Input {
 }
 
 .preview-title {
-    background: $accent;
-    color: $text;
-    padding: 1;
-    text-style: bold;
-    text-align: center;
+    color: $text-muted;
+    padding: 0 1;
+    text-align: left;
 }
 
 #config-preview {
