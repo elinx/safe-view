@@ -280,11 +280,11 @@ class QuantConfigScreen(Screen):
     def action_apply_config(self) -> None:
         """Apply the configuration and close the screen."""
         config_result = {opt.name: opt.value for opt in self.CONFIG_OPTIONS}
-        self.app.pop_screen(config_result)
+        self.dismiss(config_result)
 
     def action_cancel_config(self) -> None:
         """Cancel and close the screen."""
-        self.app.pop_screen()
+        self.dismiss()
 
 
     @on(OptionList.OptionHighlighted, "#config-list")
@@ -307,9 +307,9 @@ class QuantConfigScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "select-btn":
             config_result = {opt.name: opt.value for opt in self.CONFIG_OPTIONS}
-            self.app.pop_screen(config_result)
+            self.dismiss(config_result)
         elif event.button.id == "back-btn":
-            self.app.pop_screen()
+            self.dismiss()
 
     def get_visible_options(self) -> List[QuantConfig]:
         return [opt for opt in self.CONFIG_OPTIONS if opt.visible]
