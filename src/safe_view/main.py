@@ -221,15 +221,15 @@ class QuantConfigScreen(Screen):
     ]
 
     CONFIG_OPTIONS = [
-        QuantConfig("Bit Width", "选择量化位宽", "8-bit", ["8-bit", "4-bit"]),
-        QuantConfig("Quantization Granularity", "选择量化粒度", "Per-Channel",
+        QuantConfig("Bit Width", "Select quantization bit width", "8-bit", ["8-bit", "4-bit"]),
+        QuantConfig("Quantization Granularity", "Select quantization granularity", "Per-Channel",
                     ["Per-Tensor", "Per-Channel", "Per-Group", "Per-Block"]),
-        QuantConfig("Group Size", "分组量化大小", "128",
+        QuantConfig("Group Size", "Group size for quantization", "128",
                     ["4", "8", "16", "32", "64", "128", "256"],
                     depends_on=["Per-Group", "Per-Block"], level=1),
-        QuantConfig("Quantization Type", "量化类型", "Symmetric",
+        QuantConfig("Quantization Type", "Quantization type", "Symmetric",
                     ["Symmetric", "Asymmetric"]),
-        QuantConfig("Calibration Method", "校准方法", "Min-Max",
+        QuantConfig("Calibration Method", "Calibration method", "Min-Max",
                     ["Min-Max", "KL Divergence"]),
     ]
 
@@ -315,7 +315,7 @@ class QuantConfigScreen(Screen):
         return [opt for opt in self.CONFIG_OPTIONS if opt.visible]
 
     def update_visibility(self) -> None:
-        """根据依赖关系更新选项可见性"""
+        """Update option visibility based on dependencies"""
         granularity = next(
             opt for opt in self.CONFIG_OPTIONS if opt.name == "Quantization Granularity").value
         group_size_opt = next(
@@ -323,7 +323,7 @@ class QuantConfigScreen(Screen):
 
         group_size_opt.visible = granularity in group_size_opt.depends_on
 
-        # 更新配置列表显示
+        # Update configuration list display
         config_list = self.query_one("#config-list", OptionList)
         config_list.clear_options()
 
@@ -332,7 +332,7 @@ class QuantConfigScreen(Screen):
             prefix = "  " * opt.level
             config_list.add_option(f"{prefix}{opt.name}")
 
-        # 保持高亮位置
+        # Maintain highlight position
         if self.highlighted_index < len(visible_options):
             config_list.highlighted = self.highlighted_index
         else:
@@ -341,7 +341,7 @@ class QuantConfigScreen(Screen):
         self.update_preview()
 
     def update_detail_view(self) -> None:
-        """更新详情视图"""
+        """Update detail view"""
         visible_options = self.get_visible_options()
         if self.highlighted_index >= len(visible_options):
             return
@@ -622,7 +622,7 @@ class SafeViewApp(App):
         search_input.visible = True
         search_input.focus()
         search_input.value = ""
-        # self.notify("搜索模式已启用，输入tensor名称进行过滤", timeout=1)
+        # self.notify("Search mode enabled, enter tensor name to filter", timeout=1)
 
     def action_exit_search(self) -> None:
         """Exit search mode and reset to full list."""
@@ -633,7 +633,7 @@ class SafeViewApp(App):
         self.filtered_tensors_data = self.tensors_data  # Reset to full list
         table = self.query_one("#tensor-table", TensorInfoTable)
         table.update_table(self.filtered_tensors_data)
-        # self.notify("已退出搜索模式", timeout=1)
+        # self.notify("Exited search mode", timeout=1)
         self.query_one(TensorInfoTable).focus()
 
     def filter_tensors(self, search_term: str) -> None:
