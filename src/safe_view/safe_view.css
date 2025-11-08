@@ -16,7 +16,83 @@ TensorDetailView {
     border: solid $accent;
 }
 
+OptionList {
+    border: solid $accent;
+}
+
 Input {
     margin: 1 1;
     width: 100%;
+}
+
+.with-border {
+    border: heavy green;
+ }
+
+/* Quantization Config Screen Styles */
+.config-main {
+    layout: horizontal;
+    height: 100%;
+}
+
+.config-list-container {
+    width: 40%;
+    border: round $accent;
+    margin: 1;
+}
+
+.detail-container {
+    width: 60%;
+    padding: 0 1;
+}
+
+.config-title {
+    background: $accent;
+    color: $text;
+    padding: 1;
+    text-style: bold;
+    text-align: center;
+}
+
+.config-list {
+    height: 1fr;
+    margin: 1;
+    border: none;
+}
+
+.detail-title {
+    text-style: bold;
+    padding: 1;
+}
+
+.detail-desc {
+    padding: 0 1;
+    height: 3;
+    color: $text-muted;
+}
+
+.detail-value {
+    padding: 1;
+    background: $surface;
+    border: round $background-lighten-2;
+    margin-top: 1;
+}
+
+#value-options {
+    margin-top: 1;
+    border: round $primary;
+}
+
+.button-group {
+    height: auto;
+    margin-top: 1;
+    align: right middle;
+}
+
+.hidden {
+    display: none;
+}
+
+OptionList:focus {
+    border: double $primary;
 }

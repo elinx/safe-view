@@ -201,16 +201,22 @@ class TensorHistogramView(Static):
 
 class QuantConfig:
     def __init__(self, name: str, description: str, value: Any = None,
-                 options: List[str] = None, depends_on: List[str] = None):
+                 options: List[str] = None, depends_on: List[str] = None, level: int = 0):
         self.name = name
         self.description = description
         self.value = value
         self.options = options or []
         self.depends_on = depends_on or []
         self.visible = True
+        self.level = level
 
 
 class QuantConfigScreen(Screen):
+
+    BINDINGS = [
+        ("j", "cursor_down", "Cursor Down"),
+        ("k", "cursor_up", "Cursor Up"),
+    ]
 
     CONFIG_OPTIONS = [
         QuantConfig("Bit Width", "选择量化位宽", "8-bit", ["8-bit", "4-bit"]),
@@ -218,7 +224,7 @@ class QuantConfigScreen(Screen):
                     ["Per-Tensor", "Per-Channel", "Per-Group", "Per-Block"]),
         QuantConfig("Group Size", "分组量化大小", "128",
                     ["4", "8", "16", "32", "64", "128", "256"],
-                    depends_on=["Per-Group", "Per-Block"]),
+                    depends_on=["Per-Group", "Per-Block"], level=1),
         QuantConfig("Quantization Type", "量化类型", "Symmetric",
                     ["Symmetric", "Asymmetric"]),
         QuantConfig("Calibration Method", "校准方法", "Min-Max",
@@ -228,11 +234,10 @@ class QuantConfigScreen(Screen):
     highlighted_index: int = 0
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
+        with Horizontal(classes="config-main"):
             with Vertical(classes="config-list-container"):
                 yield Static("Quantization Configuration", classes="config-title")
-                yield OptionList(*[opt.name for opt in self.CONFIG_OPTIONS],
-                                 id="config-list", classes="config-list")
+                yield OptionList(id="config-list", classes="config-list")
 
             with Vertical(classes="detail-container"):
                 yield Static("", id="option-title", classes="detail-title")
@@ -240,25 +245,26 @@ class QuantConfigScreen(Screen):
                 yield Static("", id="option-value", classes="detail-value")
                 yield OptionList(id="value-options", classes="hidden")
                 with Horizontal(classes="button-group"):
-                    yield Button("OK", id="select-btn", flat=True)
-                    yield Button("Cancle", id="back-btn", flat=True)
+                    yield Button("Select", id="select-btn", variant="primary")
+                    yield Button("Back", id="back-btn", variant="default")
 
     def on_mount(self) -> None:
         self.update_visibility()
-        self.highlighted_index = 0
+        self.query_one("#config-list", OptionList).highlighted = 0
         self.update_detail_view()
 
-    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        if event.option_list.id == "config-list":
-            self.show_value_selection()
-            self.highlighted_index = event.option_index
-            # self.update_detail_view()
+    @on(OptionList.OptionHighlighted, "#config-list")
+    def on_config_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        self.highlighted_index = event.option_index
+        self.update_detail_view()
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_list.id == "config-list":
-            self.show_value_selection()
-        elif event.option_list.id == "value-options":
-            self.select_value(event.option_index)
+    @on(OptionList.OptionSelected, "#config-list")
+    def on_config_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.show_value_selection()
+
+    @on(OptionList.OptionSelected, "#value-options")
+    def on_value_options_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.select_value(event.option_index)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "select-btn":
@@ -268,30 +274,37 @@ class QuantConfigScreen(Screen):
 
     def show_value_selection(self) -> None:
         """显示值选择界面"""
-        option = self.CONFIG_OPTIONS[self.highlighted_index]
+        option = self.get_visible_options()[self.highlighted_index]
         value_options = self.query_one("#value-options", OptionList)
         value_options.clear_options()
         value_options.add_options(option.options)
 
         # 高亮当前值
-        current_index = option.options.index(
-            option.value) if option.value in option.options else 0
+        try:
+            current_index = option.options.index(option.value)
+        except ValueError:
+            current_index = 0
         value_options.highlighted = current_index
 
         value_options.remove_class("hidden")
         self.query_one("#select-btn").disabled = True
+        value_options.focus()
 
     def select_value(self, value_index: int) -> None:
         """选择配置值"""
-        option = self.CONFIG_OPTIONS[self.highlighted_index]
+        option = self.get_visible_options()[self.highlighted_index]
         option.value = option.options[value_index]
 
         # 隐藏值选择界面
         self.query_one("#value-options", OptionList).add_class("hidden")
         self.query_one("#select-btn").disabled = False
+        self.query_one("#config-list").focus()
 
         self.update_visibility()
         self.update_detail_view()
+
+    def get_visible_options(self) -> List[QuantConfig]:
+        return [opt for opt in self.CONFIG_OPTIONS if opt.visible]
 
     def update_visibility(self) -> None:
         """根据依赖关系更新选项可见性"""
@@ -305,26 +318,47 @@ class QuantConfigScreen(Screen):
         # 更新配置列表显示
         config_list = self.query_one("#config-list", OptionList)
         config_list.clear_options()
-        visible_options = [opt for opt in self.CONFIG_OPTIONS if opt.visible]
-        config_list.add_options([opt.name for opt in visible_options])
+        
+        visible_options = self.get_visible_options()
+        for opt in visible_options:
+            prefix = "  " * opt.level
+            config_list.add_option(f"{prefix}{opt.name}")
 
         # 保持高亮位置
         if self.highlighted_index < len(visible_options):
             config_list.highlighted = self.highlighted_index
+        else:
+            config_list.highlighted = 0
+        self.update_detail_view()
 
     def update_detail_view(self) -> None:
         """更新详情视图"""
-        if self.highlighted_index >= len(self.CONFIG_OPTIONS):
+        visible_options = self.get_visible_options()
+        if self.highlighted_index >= len(visible_options):
             return
 
-        option = self.CONFIG_OPTIONS[self.highlighted_index]
+        option = visible_options[self.highlighted_index]
 
         self.query_one("#option-title", Static).update(option.name)
         self.query_one("#option-description",
                        Static).update(option.description)
 
-        value_text = f"Current Value: {option.value}" if option.value else "未设置"
+        value_text = f"Current Value: {option.value}" if option.value else "Not Set"
         self.query_one("#option-value", Static).update(value_text)
+
+    def action_cursor_down(self) -> None:
+        """Move cursor down in the config list."""
+        config_list = self.query_one("#config-list", OptionList)
+        if config_list.highlighted is not None and config_list.highlighted < len(config_list.options) - 1:
+            config_list.highlighted += 1
+        self.update_detail_view()
+
+    def action_cursor_up(self) -> None:
+        """Move cursor up in the config list."""
+        config_list = self.query_one("#config-list", OptionList)
+        if config_list.highlighted is not None and config_list.highlighted > 0:
+            config_list.highlighted -= 1
+        self.update_detail_view()
 
 
 class SafeViewApp(App):
