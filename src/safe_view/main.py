@@ -216,6 +216,8 @@ class QuantConfigScreen(Screen):
     BINDINGS = [
         ("j", "cursor_down", "Cursor Down"),
         ("k", "cursor_up", "Cursor Up"),
+        ("s", "apply_config", "Apply"),
+        ("escape", "cancel_config", "Back"),
     ]
 
     CONFIG_OPTIONS = [
@@ -275,6 +277,15 @@ class QuantConfigScreen(Screen):
         preview_text = "\n".join(preview_lines)
         self.query_one("#config-preview", Static).update(preview_text)
 
+    def action_apply_config(self) -> None:
+        """Apply the configuration and close the screen."""
+        config_result = {opt.name: opt.value for opt in self.CONFIG_OPTIONS}
+        self.app.pop_screen(config_result)
+
+    def action_cancel_config(self) -> None:
+        """Cancel and close the screen."""
+        self.app.pop_screen()
+
 
     @on(OptionList.OptionHighlighted, "#config-list")
     def on_config_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
@@ -315,7 +326,7 @@ class QuantConfigScreen(Screen):
         # 更新配置列表显示
         config_list = self.query_one("#config-list", OptionList)
         config_list.clear_options()
-        
+
         visible_options = self.get_visible_options()
         for opt in visible_options:
             prefix = "  " * opt.level
@@ -346,7 +357,7 @@ class QuantConfigScreen(Screen):
                 value_options.highlighted = current_index
             except ValueError:
                 value_options.highlighted = 0
-        
+
         # value_text = f"Current Value: {option.value}" if option.value else "Not Set"
         # self.query_one("#option-value", Static).update(value_text)
 
@@ -811,7 +822,7 @@ class SafeViewApp(App):
         if not self.selected_tensor:
             self.notify("No tensor selected.", severity="error")
             return
-        
+
         if self.selected_tensor.get("needs_loading", True):
             self.notify("Tensor statistics must be loaded first. Press 'x' or 'Enter'.", severity="warning")
             return
@@ -840,7 +851,7 @@ class SafeViewApp(App):
 
         granularity = config.get("Quantization Granularity")
         quant_type = config.get("Quantization Type")
-        
+
         # For now, we only handle 8-bit quantization as in the original code
         # bit_width = config.get("Bit Width") # This would be used for 4-bit logic
 
@@ -879,7 +890,7 @@ class SafeViewApp(App):
             zero_points = torch.zeros(scales.shape[0], dtype=torch.long)
 
             quantized_tensor = torch.quantize_per_channel(tensor, scales, zero_points, ch_axis, torch.qint8)
-        
+
         else:
             self.notify(f"{granularity} quantization is not yet implemented.", severity="info")
             return
