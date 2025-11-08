@@ -327,61 +327,6 @@ class QuantConfigScreen(Screen):
         self.query_one("#option-value", Static).update(value_text)
 
 
-class QuantizationScreen(ModalScreen[str]):
-    """Screen with quantization options."""
-
-    def compose(self) -> ComposeResult:
-        yield Label("Select Quantization Algorithm", id="quantization-title")
-        with Container(id="main-options"):
-            yield OptionList(
-                "8-bit",
-                "4-bit",
-                id="bit-width"
-            )
-            yield OptionList(
-                "Per-Tensor",
-                "Per-Channel",
-                "Per-Group",
-                "Per-Block",
-                id="granularity"
-            )
-            # 动态显示的选项
-            with Container(id="dynamic-options", classes="hidden"):
-                yield OptionList(
-                    "4", "8", "16",
-                    "32", "64", "128",
-                    "256",
-                    id="group-size"
-                )
-            yield OptionList(
-                "Symmetric", "Asymmetric",
-                id="quant-type"
-            )
-            yield OptionList(
-                "Min-Max",
-                "KL Divergence",
-                id="calibration"
-            )
-        yield Button("Submmit", id="quantization-submit", variant="default")
-
-    def on_mount(self) -> None:
-        self.query_one("#bit-width", OptionList).border_title = "Bit Width"
-        self.query_one(
-            "#granularity", OptionList).border_title = "Quantization Granularity"
-        self.query_one(
-            "#quant-type", OptionList).border_title = "Quantization Type"
-        self.query_one(
-            "#calibration", OptionList).border_title = "Calibration Method"
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        selection_list: SelectionList = self.query_one(SelectionList)
-        if selection_list.selected:
-            algorithm = selection_list.selected[0]
-            self.dismiss(algorithm)
-        else:
-            self.dismiss("")
-
-
 class SafeViewApp(App):
     class HistogramData(Message):
         """Message with histogram data."""
@@ -824,7 +769,6 @@ class SafeViewApp(App):
             if algorithm:
                 self.quantize_tensor(algorithm)
 
-        # self.push_screen(QuantizationScreen(), quantization_callback)
         self.push_screen(QuantConfigScreen(), quantization_callback)
 
     def quantize_tensor(self, algorithm: str) -> None:
