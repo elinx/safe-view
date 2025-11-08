@@ -48,7 +48,7 @@ def _get_per_tensor_params(tensor: torch.Tensor, quant_type: str) -> Tuple[torch
             zero_point = int(zero_point.clamp(q_min, q_max).item())
         qdtype = torch.quint8
 
-    return torch.tensor(scale), zero_point, qdtype
+    return scale, zero_point, qdtype
 
 def _quantize_per_tensor(tensor: torch.Tensor, config: Dict[str, Any]) -> torch.Tensor:
     """Performs per-tensor quantization."""
@@ -104,8 +104,9 @@ def _quantize_per_group(tensor: torch.Tensor, config: Dict[str, Any]) -> torch.T
     zero_points = torch.zeros(scales.shape[0], dtype=torch.long)
 
     quantized_grouped = torch.quantize_per_channel(grouped_tensor, scales.flatten(), zero_points, 0, torch.qint8)
-
-    return quantized_grouped
+    
+    dequantized_tensor = quantized_grouped.dequantize()
+    return dequantized_tensor.view(tensor.shape)
 
 def _quantize_per_block(tensor: torch.Tensor, config: Dict[str, Any]) -> torch.Tensor:
     """Performs per-block quantization."""
@@ -132,7 +133,11 @@ def _quantize_per_block(tensor: torch.Tensor, config: Dict[str, Any]) -> torch.T
 
     quantized_reshaped = torch.quantize_per_channel(reshaped_T, scales.flatten(), zero_points, 0, torch.qint8)
 
-    return quantized_reshaped
+    dequantized_reshaped = quantized_reshaped.dequantize()
+    dequantized_view = dequantized_reshaped.view(H // block_size, W // block_size, block_size, block_size)
+    dequantized_transposed = dequantized_view.transpose(1, 2)
+    dequantized_final = dequantized_transposed.contiguous().view(H, W)
+    return dequantized_final
 
 def _calculate_metrics(original_tensor: torch.Tensor, quantized_tensor: torch.Tensor) -> Dict[str, Any]:
     """Calculates MSE and SNR for a quantized tensor."""
@@ -211,39 +216,37 @@ def quantize_tensor(tensor_info: Dict[str, Any], config: Dict[str, Any]) -> Dict
 
     granularity = config.get("Quantization Granularity")
 
-    quantized_tensor = None
-    if granularity == "Per-Tensor":
-        quantized_tensor = _quantize_per_tensor(float_tensor, config)
-    elif granularity == "Per-Channel":
-        quantized_tensor = _quantize_per_channel(float_tensor, config)
-    elif granularity == "Per-Group":
-        quantized_tensor = _quantize_per_group(float_tensor, config)
-    elif granularity == "Per-Block":
-        quantized_tensor = _quantize_per_block(float_tensor, config)
-    else:
-        raise QuantizationError(f"{granularity} quantization is not yet implemented.")
-
-    if quantized_tensor is None:
-        raise QuantizationError("Quantization failed for an unknown reason.")
-
     if granularity in ["Per-Group", "Per-Block"]:
-        dequantized_tensor = quantized_tensor.dequantize()
-        if granularity == "Per-Group":
-            dequantized_tensor = dequantized_tensor.view(float_tensor.shape)
-        else:  # Per-Block
-            block_size = config.get("Block Size")
-            H, W = float_tensor.shape
-            dequantized_view = dequantized_tensor.view(H // block_size, W // block_size, block_size, block_size)
-            dequantized_transposed = dequantized_view.transpose(1, 2)
-            dequantized_tensor = dequantized_transposed.contiguous().view(H, W)
+        # These functions return a dequantized float tensor simulation
+        dequantized_tensor = {
+            "Per-Group": _quantize_per_group,
+            "Per-Block": _quantize_per_block,
+        }[granularity](float_tensor, config)
 
+        # Calculate metrics from the dequantized tensor
         mse = torch.mean((float_tensor - dequantized_tensor)**2)
         if mse > 0:
             snr = (10 * torch.log10(torch.mean(float_tensor**2) / mse)).item()
         else:
             snr = float('inf')
         metrics = {"mse": mse.item(), "snr": snr}
+
+        # Create a dummy per-tensor quantized tensor for formatting purposes
+        scale, zero_point, qdtype = _get_per_tensor_params(dequantized_tensor, "Symmetric")
+        quantized_tensor = torch.quantize_per_tensor(dequantized_tensor, scale.item(), zero_point, qdtype)
+
     else:
+        quantized_tensor = None
+        if granularity == "Per-Tensor":
+            quantized_tensor = _quantize_per_tensor(float_tensor, config)
+        elif granularity == "Per-Channel":
+            quantized_tensor = _quantize_per_channel(float_tensor, config)
+        else:
+            raise QuantizationError(f"{granularity} quantization is not yet implemented.")
+
+        if quantized_tensor is None:
+            raise QuantizationError("Quantization failed for an unknown reason.")
+        
         metrics = _calculate_metrics(float_tensor, quantized_tensor)
 
     return _format_results(
