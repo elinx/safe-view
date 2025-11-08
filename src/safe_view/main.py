@@ -1,11 +1,12 @@
 import argparse
 from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal, VerticalScroll, Vertical
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Header, Footer, DataTable, Static, Button,
     Input, Label, SelectionList, TabbedContent,
-    TabPane, Markdown, ProgressBar
+    TabPane, Markdown, ProgressBar, RadioButton, RadioSet, OptionList
 )
 from textual_plotext import PlotextPlot
 from textual.reactive import reactive
@@ -198,6 +199,189 @@ class TensorHistogramView(Static):
         self._render_plot(self.tensor_data)
 
 
+class QuantConfig:
+    def __init__(self, name: str, description: str, value: Any = None,
+                 options: List[str] = None, depends_on: List[str] = None):
+        self.name = name
+        self.description = description
+        self.value = value
+        self.options = options or []
+        self.depends_on = depends_on or []
+        self.visible = True
+
+
+class QuantConfigScreen(Screen):
+
+    CONFIG_OPTIONS = [
+        QuantConfig("Bit Width", "选择量化位宽", "8-bit", ["8-bit", "4-bit"]),
+        QuantConfig("Quantization Granularity", "选择量化粒度", "Per-Channel",
+                    ["Per-Tensor", "Per-Channel", "Per-Group", "Per-Block"]),
+        QuantConfig("Group Size", "分组量化大小", "128",
+                    ["4", "8", "16", "32", "64", "128", "256"],
+                    depends_on=["Per-Group", "Per-Block"]),
+        QuantConfig("Quantization Type", "量化类型", "Symmetric",
+                    ["Symmetric", "Asymmetric"]),
+        QuantConfig("Calibration Method", "校准方法", "Min-Max",
+                    ["Min-Max", "KL Divergence"]),
+    ]
+
+    highlighted_index: int = 0
+
+    def compose(self) -> ComposeResult:
+        with Horizontal():
+            with Vertical(classes="config-list-container"):
+                yield Static("Quantization Configuration", classes="config-title")
+                yield OptionList(*[opt.name for opt in self.CONFIG_OPTIONS],
+                                 id="config-list", classes="config-list")
+
+            with Vertical(classes="detail-container"):
+                yield Static("", id="option-title", classes="detail-title")
+                yield Static("", id="option-description", classes="detail-desc")
+                yield Static("", id="option-value", classes="detail-value")
+                yield OptionList(id="value-options", classes="hidden")
+                with Horizontal(classes="button-group"):
+                    yield Button("OK", id="select-btn", flat=True)
+                    yield Button("Cancle", id="back-btn", flat=True)
+
+    def on_mount(self) -> None:
+        self.update_visibility()
+        self.highlighted_index = 0
+        self.update_detail_view()
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        if event.option_list.id == "config-list":
+            self.show_value_selection()
+            self.highlighted_index = event.option_index
+            # self.update_detail_view()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id == "config-list":
+            self.show_value_selection()
+        elif event.option_list.id == "value-options":
+            self.select_value(event.option_index)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "select-btn":
+            self.show_value_selection()
+        elif event.button.id == "back-btn":
+            self.app.pop_screen()
+
+    def show_value_selection(self) -> None:
+        """显示值选择界面"""
+        option = self.CONFIG_OPTIONS[self.highlighted_index]
+        value_options = self.query_one("#value-options", OptionList)
+        value_options.clear_options()
+        value_options.add_options(option.options)
+
+        # 高亮当前值
+        current_index = option.options.index(
+            option.value) if option.value in option.options else 0
+        value_options.highlighted = current_index
+
+        value_options.remove_class("hidden")
+        self.query_one("#select-btn").disabled = True
+
+    def select_value(self, value_index: int) -> None:
+        """选择配置值"""
+        option = self.CONFIG_OPTIONS[self.highlighted_index]
+        option.value = option.options[value_index]
+
+        # 隐藏值选择界面
+        self.query_one("#value-options", OptionList).add_class("hidden")
+        self.query_one("#select-btn").disabled = False
+
+        self.update_visibility()
+        self.update_detail_view()
+
+    def update_visibility(self) -> None:
+        """根据依赖关系更新选项可见性"""
+        granularity = next(
+            opt for opt in self.CONFIG_OPTIONS if opt.name == "Quantization Granularity").value
+        group_size_opt = next(
+            opt for opt in self.CONFIG_OPTIONS if opt.name == "Group Size")
+
+        group_size_opt.visible = granularity in group_size_opt.depends_on
+
+        # 更新配置列表显示
+        config_list = self.query_one("#config-list", OptionList)
+        config_list.clear_options()
+        visible_options = [opt for opt in self.CONFIG_OPTIONS if opt.visible]
+        config_list.add_options([opt.name for opt in visible_options])
+
+        # 保持高亮位置
+        if self.highlighted_index < len(visible_options):
+            config_list.highlighted = self.highlighted_index
+
+    def update_detail_view(self) -> None:
+        """更新详情视图"""
+        if self.highlighted_index >= len(self.CONFIG_OPTIONS):
+            return
+
+        option = self.CONFIG_OPTIONS[self.highlighted_index]
+
+        self.query_one("#option-title", Static).update(option.name)
+        self.query_one("#option-description",
+                       Static).update(option.description)
+
+        value_text = f"Current Value: {option.value}" if option.value else "未设置"
+        self.query_one("#option-value", Static).update(value_text)
+
+
+class QuantizationScreen(ModalScreen[str]):
+    """Screen with quantization options."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Select Quantization Algorithm", id="quantization-title")
+        with Container(id="main-options"):
+            yield OptionList(
+                "8-bit",
+                "4-bit",
+                id="bit-width"
+            )
+            yield OptionList(
+                "Per-Tensor",
+                "Per-Channel",
+                "Per-Group",
+                "Per-Block",
+                id="granularity"
+            )
+            # 动态显示的选项
+            with Container(id="dynamic-options", classes="hidden"):
+                yield OptionList(
+                    "4", "8", "16",
+                    "32", "64", "128",
+                    "256",
+                    id="group-size"
+                )
+            yield OptionList(
+                "Symmetric", "Asymmetric",
+                id="quant-type"
+            )
+            yield OptionList(
+                "Min-Max",
+                "KL Divergence",
+                id="calibration"
+            )
+        yield Button("Submmit", id="quantization-submit", variant="default")
+
+    def on_mount(self) -> None:
+        self.query_one("#bit-width", OptionList).border_title = "Bit Width"
+        self.query_one(
+            "#granularity", OptionList).border_title = "Quantization Granularity"
+        self.query_one(
+            "#quant-type", OptionList).border_title = "Quantization Type"
+        self.query_one(
+            "#calibration", OptionList).border_title = "Calibration Method"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        selection_list: SelectionList = self.query_one(SelectionList)
+        if selection_list.selected:
+            algorithm = selection_list.selected[0]
+            self.dismiss(algorithm)
+        else:
+            self.dismiss("")
+
+
 class SafeViewApp(App):
     class HistogramData(Message):
         """Message with histogram data."""
@@ -211,7 +395,8 @@ class SafeViewApp(App):
     TITLE = "Safe View"
     CSS_PATH = "safe_view.css"
     BINDINGS = [
-        ("q", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
+        ("q", "quantize", "Quantize"),
         ("h", "scroll_left", "Scroll Left"),
         ("j", "cursor_down", "Cursor Down"),
         ("k", "cursor_up", "Cursor Up"),
@@ -257,10 +442,13 @@ class SafeViewApp(App):
                             yield TensorDetailView(id="tensor-detail")
                         with TabPane("Histogram", id="histogram-tab"):
                             yield TensorHistogramView(id="tensor-histogram")
+                        with TabPane("Quantization", id="quantization-tab"):
+                            yield Markdown("Select a quantization algorithm with 'q' to see results here.", id="quantization-detail")
         yield Footer()
 
     def on_mount(self) -> None:
         """Called when the app is mounted."""
+        self.theme = "tokyo-night"
         self.title = "Safetensors File Viewer"
         self.sub_title = "Visualize deep learning model weights"
         self.process_safetensors_file()
@@ -352,6 +540,13 @@ class SafeViewApp(App):
             detail_view.tensor_data = self.selected_tensor
             histogram_view = self.query_one(TensorHistogramView)
             histogram_view.tensor_data = self.selected_tensor
+            try:
+                q_detail_view = self.query_one(
+                    "#quantization-detail", Markdown)
+                q_detail_view.update(
+                    "Select a quantization algorithm with 'q' to see results here.")
+            except:
+                pass
 
     def action_cursor_down(self) -> None:
         """Move cursor down in the table."""
@@ -617,6 +812,128 @@ class SafeViewApp(App):
         """Toggle the log scale of the histogram."""
         self.query_one(TensorHistogramView).log_scale = not self.query_one(
             TensorHistogramView).log_scale
+
+    def action_quantize(self) -> None:
+        """Show quantization options."""
+        if not self.selected_tensor:
+            self.notify("No tensor selected.", severity="error")
+            return
+        self.load_tensor_statistics(self.selected_tensor)
+
+        def quantization_callback(algorithm: str):
+            if algorithm:
+                self.quantize_tensor(algorithm)
+
+        # self.push_screen(QuantizationScreen(), quantization_callback)
+        self.push_screen(QuantConfigScreen(), quantization_callback)
+
+    def quantize_tensor(self, algorithm: str) -> None:
+        """Quantize the selected tensor using the given algorithm."""
+        tensor_info = self.selected_tensor
+
+        with safe_open(tensor_info["file_path"], framework="pt", device="cpu") as f:
+            tensor = f.get_tensor(tensor_info["name"])
+
+        dtype = tensor.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            self.notify(
+                f"Quantization only supported for float tensors. Selected tensor is {dtype}.", severity="error")
+            return
+
+        tensor = tensor.float()
+
+        quantized_tensor = None
+        if "per_tensor" in algorithm:
+            if "symmetric" in algorithm:
+                q_min, q_max = -128, 127
+                scale = torch.max(torch.abs(tensor.min()),
+                                  torch.abs(tensor.max())) / q_max
+                zero_point = 0
+                qdtype = torch.qint8
+            else:
+                q_min, q_max = 0, 255
+                scale = (tensor.max() - tensor.min()) / (q_max - q_min)
+                zero_point = q_min - torch.round(tensor.min() / scale)
+                zero_point = int(zero_point.clamp(q_min, q_max).item())
+                qdtype = torch.quint8
+
+            if scale == 0:
+                self.notify(
+                    "Cannot quantize tensor with all zero values.", severity="warning")
+                return
+
+            quantized_tensor = torch.quantize_per_tensor(
+                tensor, scale, zero_point, qdtype)
+
+        elif "per_channel" in algorithm:
+            if "asymmetric" in algorithm:
+                self.notify(
+                    "Per-channel asymmetric quantization is not supported by PyTorch.", severity="error")
+                return
+
+            if tensor.ndim <= 1:
+                self.notify(
+                    "Per-channel quantization requires at least 2 dimensions.", severity="error")
+                return
+
+            ch_axis = 0
+            scales = torch.max(torch.abs(tensor.amin(dim=ch_axis, keepdim=True)), torch.abs(
+                tensor.amax(dim=ch_axis, keepdim=True))) / 127
+            scales = scales.flatten()
+            scales[scales == 0] = 1.0
+            zero_points = torch.zeros(scales.shape[0], dtype=torch.long)
+
+            quantized_tensor = torch.quantize_per_channel(
+                tensor, scales, zero_points, ch_axis, torch.qint8)
+
+        if quantized_tensor is not None:
+            dequantized_tensor = quantized_tensor.dequantize()
+            mse = torch.mean((tensor - dequantized_tensor)**2)
+
+            if mse > 0:
+                snr = 10 * torch.log10(torch.mean(tensor**2) / mse)
+                snr = snr.item()
+            else:
+                snr = float('inf')
+
+            scale_str = ""
+            zp_str = ""
+            if quantized_tensor.qscheme() in (torch.per_tensor_affine, torch.per_tensor_symmetric):
+                scale_str = f"{quantized_tensor.q_scale():.6f}"
+                zp_str = str(quantized_tensor.q_zero_point())
+            else:
+                scales = quantized_tensor.q_per_channel_scales()
+                zero_points = quantized_tensor.q_per_channel_zero_points()
+                scale_str = f"min: {scales.min().item():.6f}, max: {scales.max().item():.6f}"
+                zp_str = f"min: {zero_points.min().item()}, max: {zero_points.max().item()}"
+
+            md_content = f"""## Quantization Results ({algorithm})
+
+### Original Tensor
+- **Data Type**: {str(dtype)}
+- **Shape**: {' × '.join(map(str, tensor.shape))}
+- **Min**: {tensor.min().item():.6f}
+- **Max**: {tensor.max().item():.6f}
+
+### Quantized Tensor
+- **Data Type**: {str(quantized_tensor.dtype)}
+- **Shape**: {' × '.join(map(str, quantized_tensor.shape))}
+- **Scale**: {scale_str}
+- **Zero Point**: {zp_str}
+
+### Quality Metrics
+- **Mean Squared Error (MSE)**: {mse.item():.6f}
+- **Signal-to-Noise Ratio (SNR)**: {snr:.2f} dB
+"""
+            try:
+                q_detail_view = self.query_one(
+                    "#quantization-detail", Markdown)
+                q_detail_view.update(md_content)
+                self.query_one(TabbedContent).active = "quantization-tab"
+            except Exception as e:
+                self.notify(
+                    f"Failed to update quantization tab: {e}", severity="error")
+
 
 def main():
     """
