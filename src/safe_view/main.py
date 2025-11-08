@@ -99,13 +99,6 @@ class TensorDetailView(Markdown):
         total_elements = data["parameters"]
 
         md_content = f"""## Tensor: {data['name']}
-
-### Basic Information
-- **Data Type**: {data['dtype']}
-- **Shape**: {shape_str}
-- **Total Elements**: {total_elements:,}
-- **Memory Usage**: {data['size_mb']:.2f} MB
-
 """
 
         # Check if statistics are already loaded
@@ -118,9 +111,6 @@ class TensorDetailView(Markdown):
 - **Std Dev**: {stats.get('std', 'N/A'):.6f}
 - **Sparsity**: {stats.get('sparsity', 0):.2f}%
 """
-            if "preview" in stats:
-                md_content += f"""\n### Data Preview\n\n```\n{stats['preview']}\n```\n"""
-
             if "quantiles" in stats and stats["quantiles"]:
                 md_content += "\n### Quantile Distribution\n\n| Percentile | Value     |\n| :--- | :--- |\n"
                 for p, v in stats["quantiles"]:
@@ -648,14 +638,14 @@ class SafeViewApp(App):
 
         if 0 <= table.cursor_row < len(self.filtered_tensors_data):
             selected_tensor = self.filtered_tensors_data[table.cursor_row]
-            
+
             # If tensor statistics haven't been loaded yet, load them first
             if selected_tensor.get("needs_loading", True):
                 self.notify("Loading tensor data for preview...", severity="information")
-                
+
                 # Load the stats in the background
                 self.compute_statistics(selected_tensor)
-                
+
                 # We'll handle showing the preview in the histogram data handler
                 self._pending_preview = True
             else:
@@ -909,7 +899,7 @@ class SafeViewApp(App):
 
 class TensorPreviewScreen(ModalScreen):
     """A screen to preview tensor data in a table format."""
-    
+
     BINDINGS = [
         ("escape", "dismiss_screen", "Close"),
         ("space", "dismiss_screen", "Close"),
@@ -930,44 +920,44 @@ class TensorPreviewScreen(ModalScreen):
     def on_mount(self) -> None:
         """Initialize the table with tensor data."""
         table = self.query_one("#preview-table", DataTable)
-        
+
         # Load the full tensor data
         with safe_open(self.tensor_data["file_path"], framework="pt", device="cpu") as f:
             tensor = f.get_tensor(self.tensor_data["name"])
-        
+
         # Flatten the tensor for display
         flattened_tensor = tensor.flatten()
-        
+
         # Get terminal size and calculate appropriate number of columns
         terminal_width = self.size.width  # Get the terminal width
-        
+
         # Each column needs space for:
         # - Column header (3 chars: e.g. "00", "01", etc.) + padding
         # - Values (up to 10 chars for floats) + padding
         # - Addr column needs 5 chars (4 digits + padding)
-        
+
         # Estimate space required per column (allowing max 12 chars per column)
         approx_chars_per_col = 12
         addr_column_chars = 5  # For address column
-        
+
         # Calculate max possible columns, with a reasonable minimum
         available_width = terminal_width - addr_column_chars - 4  # 4 char buffer
         estimated_num_cols = max(1, available_width // approx_chars_per_col)
-        
+
         # Set reasonable limits and ensure even number of columns
         num_cols = min(estimated_num_cols, 16)
         num_cols = max(num_cols, 4)  # At least 4 columns
-        
+
         # Ensure number of columns is even
         if num_cols % 2 != 0:
             num_cols -= 1  # Make it even if odd
-        
+
         # Create header row with column indices
         header_row = ["Addr"]
         for col in range(num_cols):
             header_row.append(f"{col:02d}")
         table.add_columns(*header_row)
-        
+
         # Determine how many digits to show based on the data type
         tensor_dtype = tensor.dtype
         if tensor_dtype in [torch.float32, torch.bfloat16, torch.float16]:
@@ -978,7 +968,7 @@ class TensorPreviewScreen(ModalScreen):
             format_str = "{}"
         else:
             format_str = "{:.6f}"  # Default to float format
-        
+
         # Add rows to the table in a hex-editor style format
         max_display = min(len(flattened_tensor), 2048)  # Limit to 2048 elements to prevent overwhelming the UI
         for row_idx in range(0, max_display, num_cols):
@@ -992,7 +982,7 @@ class TensorPreviewScreen(ModalScreen):
                     # If we've run out of tensor data, add empty cells
                     row_data.append("--")
             table.add_row(*row_data)
-        
+
         # Focus the table for scrolling
         table.focus()
 
