@@ -234,18 +234,26 @@ class QuantConfigScreen(Screen):
     highlighted_index: int = 0
 
     def compose(self) -> ComposeResult:
-        with Horizontal(classes="config-main"):
-            with Vertical(classes="config-list-container"):
-                yield Static("Quantization Configuration", classes="config-title")
-                yield OptionList(id="config-list", classes="config-list")
-
-            with Vertical(classes="detail-container"):
-                yield Static("", id="option-title", classes="detail-title")
-                yield Static("", id="option-description", classes="detail-desc")
-                yield OptionList(id="value-options")
-                with Horizontal(classes="button-group"):
-                    yield Button("Select", id="select-btn", variant="primary")
-                    yield Button("Back", id="back-btn", variant="default")
+        yield Vertical(
+            Horizontal(
+                Vertical(
+                    Static("Configuration", classes="config-title"),
+                    OptionList(id="config-list", classes="config-list"),
+                    classes="config-list-container"
+                ),
+                Vertical(
+                    Static("Value", classes="config-title"),
+                    OptionList(id="value-options"),
+                    classes="detail-container"
+                ),
+                classes="config-main"
+            ),
+            Horizontal(
+                Button("Apply", id="select-btn", variant="primary"),
+                Button("Back", id="back-btn", variant="default"),
+                classes="button-group"
+            )
+        )
 
     def on_mount(self) -> None:
         self.update_visibility()
@@ -271,7 +279,8 @@ class QuantConfigScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "select-btn":
-            self.query_one("#value-options").focus()
+            config_result = {opt.name: opt.value for opt in self.CONFIG_OPTIONS}
+            self.app.pop_screen(config_result)
         elif event.button.id == "back-btn":
             self.app.pop_screen()
 
@@ -310,10 +319,6 @@ class QuantConfigScreen(Screen):
             return
 
         option = visible_options[self.highlighted_index]
-
-        self.query_one("#option-title", Static).update(option.name)
-        self.query_one("#option-description",
-                       Static).update(option.description)
 
         value_options = self.query_one("#value-options", OptionList)
         value_options.clear_options()
@@ -789,15 +794,18 @@ class SafeViewApp(App):
         if not self.selected_tensor:
             self.notify("No tensor selected.", severity="error")
             return
-        self.load_tensor_statistics(self.selected_tensor)
+        
+        if self.selected_tensor.get("needs_loading", True):
+            self.notify("Tensor statistics must be loaded first. Press 'x' or 'Enter'.", severity="warning")
+            return
 
-        def quantization_callback(algorithm: str):
-            if algorithm:
-                self.quantize_tensor(algorithm)
+        def quantization_callback(config: Dict[str, Any]):
+            if config:
+                self.quantize_tensor(config)
 
         self.push_screen(QuantConfigScreen(), quantization_callback)
 
-    def quantize_tensor(self, algorithm: str) -> None:
+    def quantize_tensor(self, config: Dict[str, Any]) -> None:
         """Quantize the selected tensor using the given algorithm."""
         tensor_info = self.selected_tensor
 
@@ -811,16 +819,21 @@ class SafeViewApp(App):
             return
 
         tensor = tensor.float()
-
         quantized_tensor = None
-        if "per_tensor" in algorithm:
-            if "symmetric" in algorithm:
+
+        granularity = config.get("Quantization Granularity")
+        quant_type = config.get("Quantization Type")
+        
+        # For now, we only handle 8-bit quantization as in the original code
+        # bit_width = config.get("Bit Width") # This would be used for 4-bit logic
+
+        if granularity == "Per-Tensor":
+            if quant_type == "Symmetric":
                 q_min, q_max = -128, 127
-                scale = torch.max(torch.abs(tensor.min()),
-                                  torch.abs(tensor.max())) / q_max
+                scale = torch.max(torch.abs(tensor.min()), torch.abs(tensor.max())) / q_max
                 zero_point = 0
                 qdtype = torch.qint8
-            else:
+            else: # Asymmetric
                 q_min, q_max = 0, 255
                 scale = (tensor.max() - tensor.min()) / (q_max - q_min)
                 zero_point = q_min - torch.round(tensor.min() / scale)
@@ -828,33 +841,31 @@ class SafeViewApp(App):
                 qdtype = torch.quint8
 
             if scale == 0:
-                self.notify(
-                    "Cannot quantize tensor with all zero values.", severity="warning")
+                self.notify("Cannot quantize tensor with all zero values.", severity="warning")
                 return
 
-            quantized_tensor = torch.quantize_per_tensor(
-                tensor, scale, zero_point, qdtype)
+            quantized_tensor = torch.quantize_per_tensor(tensor, scale, zero_point, qdtype)
 
-        elif "per_channel" in algorithm:
-            if "asymmetric" in algorithm:
-                self.notify(
-                    "Per-channel asymmetric quantization is not supported by PyTorch.", severity="error")
+        elif granularity == "Per-Channel":
+            if quant_type == "Asymmetric":
+                self.notify("Per-channel asymmetric quantization is not supported by PyTorch.", severity="error")
                 return
 
             if tensor.ndim <= 1:
-                self.notify(
-                    "Per-channel quantization requires at least 2 dimensions.", severity="error")
+                self.notify("Per-channel quantization requires at least 2 dimensions.", severity="error")
                 return
 
             ch_axis = 0
-            scales = torch.max(torch.abs(tensor.amin(dim=ch_axis, keepdim=True)), torch.abs(
-                tensor.amax(dim=ch_axis, keepdim=True))) / 127
+            scales = torch.max(torch.abs(tensor.amin(dim=ch_axis, keepdim=True)), torch.abs(tensor.amax(dim=ch_axis, keepdim=True))) / 127
             scales = scales.flatten()
             scales[scales == 0] = 1.0
             zero_points = torch.zeros(scales.shape[0], dtype=torch.long)
 
-            quantized_tensor = torch.quantize_per_channel(
-                tensor, scales, zero_points, ch_axis, torch.qint8)
+            quantized_tensor = torch.quantize_per_channel(tensor, scales, zero_points, ch_axis, torch.qint8)
+        
+        else:
+            self.notify(f"{granularity} quantization is not yet implemented.", severity="info")
+            return
 
         if quantized_tensor is not None:
             dequantized_tensor = quantized_tensor.dequantize()
@@ -877,7 +888,8 @@ class SafeViewApp(App):
                 scale_str = f"min: {scales.min().item():.6f}, max: {scales.max().item():.6f}"
                 zp_str = f"min: {zero_points.min().item()}, max: {zero_points.max().item()}"
 
-            md_content = f"""## Quantization Results ({algorithm})
+            algorithm_str = f"{config.get('Bit Width', '')} {granularity} {quant_type}"
+            md_content = f"""## Quantization Results ({algorithm_str})
 
 ### Original Tensor
 - **Data Type**: {str(dtype)}
@@ -896,13 +908,11 @@ class SafeViewApp(App):
 - **Signal-to-Noise Ratio (SNR)**: {snr:.2f} dB
 """
             try:
-                q_detail_view = self.query_one(
-                    "#quantization-detail", Markdown)
+                q_detail_view = self.query_one("#quantization-detail", Markdown)
                 q_detail_view.update(md_content)
                 self.query_one(TabbedContent).active = "quantization-tab"
             except Exception as e:
-                self.notify(
-                    f"Failed to update quantization tab: {e}", severity="error")
+                self.notify(f"Failed to update quantization tab: {e}", severity="error")
 
 
 def main():

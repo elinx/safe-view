@@ -32,17 +32,19 @@ Input {
 /* Quantization Config Screen Styles */
 .config-main {
     layout: horizontal;
-    height: 100%;
+    height: 1fr;
 }
 
 .config-list-container {
-    width: 40%;
+    width: 50%;
     border: round $accent;
     margin: 1;
 }
 
 .detail-container {
-    width: 60%;
+    width: 50%;
+    border: round $accent;
+    margin: 1;
     padding: 0 1;
 }
 
@@ -86,7 +88,7 @@ Input {
 .button-group {
     height: auto;
     margin-top: 1;
-    align: right middle;
+    align: center middle;
 }
 
 .hidden {
