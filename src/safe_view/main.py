@@ -21,6 +21,7 @@ import humanize
 from huggingface_hub import snapshot_download
 from textual.message import Message
 import math
+from .quantization import quantize_tensor, QuantizationError
 
 class SafetensorsHeader(Static):
     """Displays header information for the safetensors file."""
@@ -224,8 +225,8 @@ class QuantConfigScreen(Screen):
         QuantConfig("Bit Width", "Select quantization bit width", "8-bit", ["8-bit", "4-bit"]),
         QuantConfig("Quantization Granularity", "Select quantization granularity", "Per-Channel",
                     ["Per-Tensor", "Per-Channel", "Per-Group", "Per-Block"]),
-        QuantConfig("Group Size", "Group size for quantization", "128",
-                    ["4", "8", "16", "32", "64", "128", "256"],
+        QuantConfig("Group Size", "Group size for quantization", 128,
+                    [4, 8, 16, 32, 64, 128, 256],
                     depends_on=["Per-Group", "Per-Block"], level=1),
         QuantConfig("Quantization Type", "Quantization type", "Symmetric",
                     ["Symmetric", "Asymmetric"]),
@@ -834,113 +835,38 @@ class SafeViewApp(App):
         self.push_screen(QuantConfigScreen(), quantization_callback)
 
     def quantize_tensor(self, config: Dict[str, Any]) -> None:
-        """Quantize the selected tensor using the given algorithm."""
-        tensor_info = self.selected_tensor
+        """
+        Calls the quantization function and updates the UI with the results.
+        """
+        try:
+            results = quantize_tensor(self.selected_tensor, config)
 
-        with safe_open(tensor_info["file_path"], framework="pt", device="cpu") as f:
-            tensor = f.get_tensor(tensor_info["name"])
-
-        dtype = tensor.dtype
-        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
-            self.notify(
-                f"Quantization only supported for float tensors. Selected tensor is {dtype}.", severity="error")
-            return
-
-        tensor = tensor.float()
-        quantized_tensor = None
-
-        granularity = config.get("Quantization Granularity")
-        quant_type = config.get("Quantization Type")
-
-        # For now, we only handle 8-bit quantization as in the original code
-        # bit_width = config.get("Bit Width") # This would be used for 4-bit logic
-
-        if granularity == "Per-Tensor":
-            if quant_type == "Symmetric":
-                q_min, q_max = -128, 127
-                scale = torch.max(torch.abs(tensor.min()), torch.abs(tensor.max())) / q_max
-                zero_point = 0
-                qdtype = torch.qint8
-            else: # Asymmetric
-                q_min, q_max = 0, 255
-                scale = (tensor.max() - tensor.min()) / (q_max - q_min)
-                zero_point = q_min - torch.round(tensor.min() / scale)
-                zero_point = int(zero_point.clamp(q_min, q_max).item())
-                qdtype = torch.quint8
-
-            if scale == 0:
-                self.notify("Cannot quantize tensor with all zero values.", severity="warning")
-                return
-
-            quantized_tensor = torch.quantize_per_tensor(tensor, scale, zero_point, qdtype)
-
-        elif granularity == "Per-Channel":
-            if quant_type == "Asymmetric":
-                self.notify("Per-channel asymmetric quantization is not supported by PyTorch.", severity="error")
-                return
-
-            if tensor.ndim <= 1:
-                self.notify("Per-channel quantization requires at least 2 dimensions.", severity="error")
-                return
-
-            ch_axis = 0
-            scales = torch.max(torch.abs(tensor.amin(dim=ch_axis, keepdim=True)), torch.abs(tensor.amax(dim=ch_axis, keepdim=True))) / 127
-            scales = scales.flatten()
-            scales[scales == 0] = 1.0
-            zero_points = torch.zeros(scales.shape[0], dtype=torch.long)
-
-            quantized_tensor = torch.quantize_per_channel(tensor, scales, zero_points, ch_axis, torch.qint8)
-
-        else:
-            self.notify(f"{granularity} quantization is not yet implemented.", severity="info")
-            return
-
-        if quantized_tensor is not None:
-            dequantized_tensor = quantized_tensor.dequantize()
-            mse = torch.mean((tensor - dequantized_tensor)**2)
-
-            if mse > 0:
-                snr = 10 * torch.log10(torch.mean(tensor**2) / mse)
-                snr = snr.item()
-            else:
-                snr = float('inf')
-
-            scale_str = ""
-            zp_str = ""
-            if quantized_tensor.qscheme() in (torch.per_tensor_affine, torch.per_tensor_symmetric):
-                scale_str = f"{quantized_tensor.q_scale():.6f}"
-                zp_str = str(quantized_tensor.q_zero_point())
-            else:
-                scales = quantized_tensor.q_per_channel_scales()
-                zero_points = quantized_tensor.q_per_channel_zero_points()
-                scale_str = f"min: {scales.min().item():.6f}, max: {scales.max().item():.6f}"
-                zp_str = f"min: {zero_points.min().item()}, max: {zero_points.max().item()}"
-
-            algorithm_str = f"{config.get('Bit Width', '')} {granularity} {quant_type}"
-            md_content = f"""## Quantization Results ({algorithm_str})
+            md_content = f"""## Quantization Results ({results['algorithm']})
 
 ### Original Tensor
-- **Data Type**: {str(dtype)}
-- **Shape**: {' × '.join(map(str, tensor.shape))}
-- **Min**: {tensor.min().item():.6f}
-- **Max**: {tensor.max().item():.6f}
+- **Data Type**: {results['original_dtype']}
+- **Shape**: {results['original_shape']}
+- **Min**: {results['original_min']:.6f}
+- **Max**: {results['original_max']:.6f}
 
 ### Quantized Tensor
-- **Data Type**: {str(quantized_tensor.dtype)}
-- **Shape**: {' × '.join(map(str, quantized_tensor.shape))}
-- **Scale**: {scale_str}
-- **Zero Point**: {zp_str}
+- **Data Type**: {results['quantized_dtype']}
+- **Shape**: {results['quantized_shape']}
+- **Scale**: {results['scale']}
+- **Zero Point**: {results['zero_point']}
 
 ### Quality Metrics
-- **Mean Squared Error (MSE)**: {mse.item():.6f}
-- **Signal-to-Noise Ratio (SNR)**: {snr:.2f} dB
+- **Mean Squared Error (MSE)**: {results['mse']:.6f}
+- **Signal-to-Noise Ratio (SNR)**: {results['snr']:.2f} dB
 """
-            try:
-                q_detail_view = self.query_one("#quantization-detail", Markdown)
-                q_detail_view.update(md_content)
-                self.query_one(TabbedContent).active = "quantization-tab"
-            except Exception as e:
-                self.notify(f"Failed to update quantization tab: {e}", severity="error")
+            q_detail_view = self.query_one("#quantization-detail", Markdown)
+            q_detail_view.update(md_content)
+            self.query_one(TabbedContent).active = "quantization-tab"
+
+        except QuantizationError as e:
+            self.notify(str(e), severity="error")
+        except Exception as e:
+            self.notify(f"An unexpected error occurred: {e}", severity="error")
 
 
 def main():
