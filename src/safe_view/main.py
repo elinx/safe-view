@@ -938,8 +938,29 @@ class TensorPreviewScreen(ModalScreen):
         # Flatten the tensor for display
         flattened_tensor = tensor.flatten()
         
-        # Use 8 columns by default
-        num_cols = 8
+        # Get terminal size and calculate appropriate number of columns
+        terminal_width = self.size.width  # Get the terminal width
+        
+        # Each column needs space for:
+        # - Column header (3 chars: e.g. "00", "01", etc.) + padding
+        # - Values (up to 10 chars for floats) + padding
+        # - Addr column needs 5 chars (4 digits + padding)
+        
+        # Estimate space required per column (allowing max 12 chars per column)
+        approx_chars_per_col = 12
+        addr_column_chars = 5  # For address column
+        
+        # Calculate max possible columns, with a reasonable minimum
+        available_width = terminal_width - addr_column_chars - 4  # 4 char buffer
+        estimated_num_cols = max(1, available_width // approx_chars_per_col)
+        
+        # Set reasonable limits and ensure even number of columns
+        num_cols = min(estimated_num_cols, 16)
+        num_cols = max(num_cols, 4)  # At least 4 columns
+        
+        # Ensure number of columns is even
+        if num_cols % 2 != 0:
+            num_cols -= 1  # Make it even if odd
         
         # Create header row with column indices
         header_row = ["Addr"]

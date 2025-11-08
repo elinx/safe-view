@@ -123,8 +123,7 @@ TensorPreviewScreen {
 .preview-container {
     width: 90%;
     height: 90%;
-    border: round $accent;
-    padding: 1;
+    border: round $background-lighten-2;
     layout: vertical;
 }
 
