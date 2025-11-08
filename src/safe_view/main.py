@@ -962,13 +962,13 @@ class TensorPreviewScreen(ModalScreen):
         # Determine how many digits to show based on the data type
         tensor_dtype = tensor.dtype
         if tensor_dtype in [torch.float32, torch.bfloat16, torch.float16]:
-            format_str = "{:.6f}"
+            format_str = "{: .6f}"
         elif tensor_dtype in [torch.int32, torch.int64, torch.int16, torch.int8]:
-            format_str = "{}"
+            format_str = "{: }"
         elif tensor_dtype in [torch.uint8, torch.uint16, torch.uint32, torch.uint64]:
-            format_str = "{}"
+            format_str = "{: }"
         else:
-            format_str = "{:.6f}"  # Default to float format
+            format_str = "{: .6f}"  # Default to float format
 
         # Add rows to the table in a hex-editor style format
         max_display = min(len(flattened_tensor), 2048)  # Limit to 2048 elements to prevent overwhelming the UI
