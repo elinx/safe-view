@@ -248,6 +248,11 @@ class QuantConfigScreen(Screen):
                 ),
                 classes="config-main"
             ),
+            Vertical(
+                Static("Live Preview", classes="preview-title"),
+                Static(id="config-preview"),
+                classes="preview-container"
+            ),
             Horizontal(
                 Button("Apply", id="select-btn", variant="primary"),
                 Button("Back", id="back-btn", variant="default"),
@@ -260,6 +265,16 @@ class QuantConfigScreen(Screen):
         self.query_one("#config-list", OptionList).highlighted = 0
         self.update_detail_view()
         self.query_one("#config-list").focus()
+        self.update_preview()
+
+    def update_preview(self) -> None:
+        """Updates the live preview area with the current config."""
+        preview_lines = []
+        for opt in self.get_visible_options():
+            preview_lines.append(f"[b]{opt.name}:[/b] {opt.value}")
+        preview_text = "\n".join(preview_lines)
+        self.query_one("#config-preview", Static).update(preview_text)
+
 
     @on(OptionList.OptionHighlighted, "#config-list")
     def on_config_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
@@ -276,6 +291,7 @@ class QuantConfigScreen(Screen):
         option.value = option.options[event.option_index]
         self.update_visibility()
         self.query_one("#config-list").focus()
+        self.update_preview()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "select-btn":
@@ -311,6 +327,7 @@ class QuantConfigScreen(Screen):
         else:
             config_list.highlighted = 0
         self.update_detail_view()
+        self.update_preview()
 
     def update_detail_view(self) -> None:
         """更新详情视图"""

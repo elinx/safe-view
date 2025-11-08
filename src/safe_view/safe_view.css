@@ -85,6 +85,26 @@ Input {
     border: round $primary;
 }
 
+.preview-container {
+    border: round $accent;
+    margin: 1;
+    padding: 0 1;
+    height: auto;
+}
+
+.preview-title {
+    background: $accent;
+    color: $text;
+    padding: 1;
+    text-style: bold;
+    text-align: center;
+}
+
+#config-preview {
+    padding: 1;
+    background: $surface;
+}
+
 .button-group {
     height: auto;
     margin-top: 1;
