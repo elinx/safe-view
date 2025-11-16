@@ -1,6 +1,6 @@
 [project]
 name = "safe-view"
-version = "0.3.1"
+version = "0.4.0"
 description = "A terminal application to view safetensors files"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -11,6 +11,7 @@ dependencies = [
     "huggingface-hub",
     "torch",
     "textual-plotext",
+    "numpy>=2.0.2",
 ]
 authors = [
     {name = "Elinx"},
